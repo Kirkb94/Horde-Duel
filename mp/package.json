@@ -1,0 +1,15 @@
+{
+  "name": "horde-duel-online",
+  "version": "1.0.0",
+  "description": "Relay server for Horde Duel online multiplayer (up to 16 players per room)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
