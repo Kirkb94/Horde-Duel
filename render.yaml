@@ -2,7 +2,9 @@ services:
   - type: web
     name: horde-duel
     runtime: node
-    plan: free
+    # Server-authoritative mode runs the whole match on the server, which needs CPU: use Starter or higher.
+    # To stay on the free plan, set plan: free and MODE to relay (the room creator's browser runs the match).
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /healthz
@@ -10,3 +12,5 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: MODE
+        value: auth

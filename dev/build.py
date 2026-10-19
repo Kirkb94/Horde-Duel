@@ -1,5 +1,5 @@
 import re,sys
-src=open('../storm-duel-horde.html').read()
+src=open('/home/claude/storm-duel-horde.html').read()
 def rep(old,new,cnt=1):
     global src
     n=src.count(old)
@@ -17,13 +17,14 @@ rep("function togglePause(){","function togglePause(){if(NET.m){netTogglePause()
 rep("if(document.hidden&&(G.mode==='play'||G.mode==='count'))togglePause()","if(document.hidden&&!NET.m&&(G.mode==='play'||G.mode==='count'))togglePause()")
 rep("case 'menu':menu();break;","case 'menu':if(NET.code||NET.m){netLeave();break}menu();break;")
 rep("case 'wep':G.pick=v;save();","case 'wep':G.pick=v;save();if(NET.code)netSend({t:'upd',weapon:v});")
-rep("    case 'zombies':startZombies();break;","    case 'zombies':startZombies();break;\n    case 'online':netMenu();break;\n    case 'n_quick':case 'n_create':case 'n_join':case 'n_start':case 'n_leave':case 'n_lobby':netAct2(b.dataset.act,v);break;")
+rep("    case 'zombies':startZombies();break;","    case 'zombies':startZombies();break;\n    case 'online':netMenu();break;\n    case 'n_quick':case 'n_create':case 'n_join':case 'n_start':case 'n_leave':case 'n_lobby':case 'n_mode':case 'n_team':netAct2(b.dataset.act,v);break;")
 rep("case 'spec':G.mode='play';hide();break;","case 'spec':if(!NET.m)G.mode='play';hide();break;")
 rep("    case 'pick':\n      if(v)applyUpgrade(G.P,v,+b.dataset.m||1);","    case 'pick':\n      if(NET.m==='client'){netClientPick(v,+b.dataset.m||1);break}\n      if(v)applyUpgrade(G.P,v,+b.dataset.m||1);")
 rep("if(G.pickCtx==='between'){for(const f of G.fighters)if(f.isAI)aiPick(f);G.dropNo++;startDrop()}","if(G.pickCtx==='between'){if(NET.m==='host'){netHostOwnPicked();break}for(const f of G.fighters)if(f.isAI)aiPick(f);G.dropNo++;startDrop()}")
 rep("function update(dt){\n  for(let i=G.fx.length-1","function update0(dt){\n  for(let i=G.fx.length-1")
 rep("  if(!G.P)return;\n  SFX.tick(dt);","  if(!G.P)return;\n  SFX.tick(dt);\n  if(NET.m==='client'){netClientUpdate(dt);return}")
-rep("if(f===P&&!G.debug)controlPlayer(dt);else if(f.zomb)controlHorde(f,dt);","if(f===P&&!G.debug)controlPlayer(dt);else if(f.remote)controlRemote(f,dt);else if(f.zomb)controlHorde(f,dt);")
+rep("if(f===P&&!G.debug)controlPlayer(dt);else if(f.zomb)controlHorde(f,dt);","if(f.remote)controlRemote(f,dt);else if(f===P&&!G.debug&&!NET.srv)controlPlayer(dt);else if(f.zomb)controlHorde(f,dt);")
+rep("if(t===G.P&&!G.debug){G.spectating=true","if(t===G.P&&!G.debug&&!NET.srv){G.spectating=true")
 rep("G.mode='elim';\n  show(","if(!NET.m)G.mode='elim';\n  show(")
 rep('<button class="go ghost" data-act="skip">Skip ahead</button></div>`);','${NET.m?\'<button class="go ghost" data-act="menu">Leave match</button>\':\'<button class="go ghost" data-act="skip">Skip ahead</button>\'}</div>`);')
 rep("for(let i=0;i<steps;i++)update(dt);","const st2=(NET.m==='host'&&G.mode==='play'&&netNoHumans())?4:(NET.m?1:steps);for(let i=0;i<st2;i++)update(dt);")
@@ -35,9 +36,9 @@ css=""".nin{width:100%;box-sizing:border-box;background:var(--void);color:var(--
 #netInfo{position:fixed;top:4px;left:50%;transform:translateX(-50%);font:600 11px var(--mono);color:var(--muted);z-index:9;pointer-events:none;letter-spacing:.06em;text-shadow:0 1px 2px #000}
 </style>"""
 i=src.index("</style>");src=src[:i]+css+src[i+8:]
-net=open('dev/net.js').read()
+net=open('src/net.js').read()
 mark="pfInit();resize();menu();requestAnimationFrame(frame);"
-rep(mark,net+"\n"+mark)
+rep(mark,net+"\nif(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,humans:netHumans,NET,G};}else{"+mark+"}")
 rep("<title>","<title>Online · ") if False else None
 import os
 if os.environ.get('TEST'):
@@ -45,5 +46,5 @@ if os.environ.get('TEST'):
     open('/tmp/claude-0/t/test.html','w').write(src)
 else:
     src=src.replace('window.__G=G;','')
-    open('public/index.html','w').write(src)
+    open('/home/claude/mp/public/index.html','w').write(src)
 print('built',len(src))
