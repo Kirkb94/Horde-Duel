@@ -6,7 +6,7 @@ const NET={ws:null,role:null,m:null,live:false,pid:0,hostPid:0,code:'',players:[
   cfg:{mode:'br',size:16},lastSnap:0,gotSnap:false,lag:.05,pts:null,betT:0,paused:false,keyR:0,hpPrev:0,hurtT:0,waitEl:null};
 try{NET.name=localStorage.getItem('hordename')||''}catch(e){}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const FK=['x','y','facing','hp','armor','vx','vy','dashT','jumpT','jx','jy','jtx','jty','jumpMax','swingT','swingSide','muzzle','reloadT','rdT','shield','shieldDir','shieldMax','cloakT','healT','healMax','burnT','slowT','markT','hitFlash','parryT','swordOut','defl','inv','stillT','shF','hurtT','healKind'];
+const FK=['x','y','facing','hp','armor','vx','vy','dashT','jumpT','jx','jy','jtx','jty','jumpMax','swingT','swingSide','muzzle','reloadT','rdT','shield','shieldDir','shieldMax','cloakT','healT','healMax','burnT','slowT','markT','hitFlash','parryT','swordOut','defl','inv','stillT','shF','hurtT','healKind','down','downT','revP','finP','tagT','tagBy','zoom','litT','fenceT','fenceN','scanWarn'];
 const XK=['level','xp','kills','dropKills','wins','pts','zk','ammo','abCD','abCh','abChT','mines','mineT','band','kit','dashCD','hurtA','place','pend','slowAmt','dashSp','dashDir'];
 const ZKS=['walker','brute','sprinter','hunter','runner','boss'];
 const ITM=[undefined,'band','kit','armor'];
@@ -121,6 +121,7 @@ function netAct2(act,v){
     case'n_start':if(NET.role==='host'&&NET.players.length){if(NET.auth)netSend({t:'start',diff:G.diff});else{netSend({t:'start'});netHostStart()}}break;
     case'n_leave':netLeave();break;
     case'n_lobby':netSend({t:'lobby'});break;
+    case'n_rematch':if(NET.role==='host'){netSend({t:'rematch',diff:G.diff});if(!NET.auth)netHostStart()}break;
     case'n_mode':if(NET.role==='host')netSend({t:'cfg',mode:v,size:NET.cfg.size});break;
     case'n_team':netSend({t:'upd',team:+v});break;
   }
@@ -173,12 +174,14 @@ const netNoHumans=()=>!G.fighters.slice(0,N_FIGHT).some(f=>f.alive&&!f.isAI);
 // remote human inputs -> fighter state
 function controlRemote(f,dt){
   const I=NET.inp[f.pid];if(!I){f.mv={x:0,y:0};f.wantFire=false;return}
-  const mm=Math.hypot(I.mx,I.my);f.mv=mm>1?{x:I.mx/mm,y:I.my/mm}:{x:I.mx,y:I.my};f.facing=I.f;f.wantFire=!!I.fr;
+  const mm=Math.hypot(I.mx,I.my);f.mv=mm>1?{x:I.mx/mm,y:I.my/mm}:{x:I.mx,y:I.my};f.facing=I.f;f.wantFire=!!I.fr&&!f.down;
+  if(f.down){I.acts=[];return}
   const acts=I.acts;I.acts=[];
   for(const a of acts){
     if(a[0]==='d')tryDash(f,+a[1]||0,+a[2]||0);
     else if(a[0]==='h'){const k=a[1]===1?'band':'kit';if(f.healT>0){f.healT=0;f.healKind=null}else startHeal(f,k)}
-    else if(a[0]==='a'){if(f.weapon!=='revolver')useAbility(f)}
+    else if(a[0]==='a'){if(f.weapon!=='revolver'){if(f.weapon==='crossbow'&&a.length>2)f.tgtPt={x:+a[1]||f.x,y:+a[2]||f.y};useAbility(f);f.tgtPt=null}}
+    else if(a[0]==='z')toggleZoom(f);
     else if(a[0]==='m'&&f.weapon==='revolver'){
       const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,Math.min(d,rayCast(f.x,f.y,ang,d+30)-10));
       f.facing=ang;f.throwTarget={x:f.x+Math.cos(ang)*w,y:f.y+Math.sin(ang)*w};useAbility(f);f.throwTarget=null}
@@ -189,13 +192,14 @@ function controlRemote(f,dt){
 function netBroadcastRes(){
   const fs=G.fighters.slice(0,N_FIGHT),fin=fs.some(f=>f.wins>=WIN_DROPS),st=fs.map(f=>[f.wins,f.pts,f.kills,f.place,f.dropKills,f.level]);
   NET.ready={};if(NET.srv)NET.ready[NET.pid]=true;NET.betT=performance.now()+50000;
-  for(const pid in NET.cl){const f=NET.cl[pid].f;netRel(+pid,{k:'res',dn:G.dropNo,fin,w:G.winner?G.winner.id:0,st,pk:fin?0:(f.pend||0)+1})}
+  for(const pid in NET.cl){const f=NET.cl[pid].f;netRel(+pid,{k:'res',dn:G.dropNo,fin,w:G.winner?G.winner.id:0,st,pk:fin?0:(f.pend||0)+1,reel:fin?reelGet():undefined})}
 }
+function netEndRow(){return (G.reel?'<button class="go ghost" data-act="reel">Highlights</button>':'')+(NET.role==='host'?'<button class="go" data-act="n_rematch">Rematch</button><button class="go ghost" data-act="n_lobby">Back to lobby</button>':'')+'<button class="go ghost" data-act="menu">Leave</button>'}
 const dropResults0=dropResults;
 dropResults=function(){
   if(NET.m==='host'&&NET.resDn!==G.dropNo){NET.resDn=G.dropNo;netBroadcastRes()}
   dropResults0();
-  if(NET.m==='host'&&G.mode==='over'){const r=panel.querySelector('.row');if(r)r.innerHTML='<button class="go" data-act="n_lobby">Back to lobby</button><button class="go ghost" data-act="menu">Leave</button>'}
+  if(NET.m==='host'&&G.mode==='over'){const r=panel.querySelector('.row');if(r)r.innerHTML=netEndRow()}
 };
 function netWaitPanel(){
   show(`<p class="eyebrow">Drop ${G.dropNo} complete</p><h2>Waiting for players…</h2><p class="lede" id="nWait"></p>`);NET.waitEl=$('#nWait');netWaitText();
@@ -250,7 +254,7 @@ function netSnapFor(c){
   const f=c.f,V=(!f.alive&&c.sv!=null&&c.sv>=0&&fById(c.sv))||f,cx=V.x,cy=V.y,R2=900*900,fs=G.fighters;
   const F=[];
   for(let i=0;i<N_FIGHT;i++){const o=fs[i];if(o===f)continue;const dx=o.x-cx,dy=o.y-cy;
-    if(dx*dx+dy*dy<R2)F.push([i,o.alive?1:0,1,...enc(o,FK)]);else F.push([i,o.alive?1:0,0,Math.round(o.x),Math.round(o.y)])}
+    if(dx*dx+dy*dy<R2)F.push([i,o.alive?1:0,1,...enc(o,FK)]);else F.push([i,o.alive?1:0,0,Math.round(o.x),Math.round(o.y),Math.round(o.hp),q2(o.tagT||0),o.tagBy==null?-1:o.tagBy])}
   c.n=(c.n||0)+1;
   let Z;
   if(c.n%2===0){Z=[];const ZR2=780*780;
@@ -265,7 +269,7 @@ function netSnapFor(c){
     if(e.only&&e.only.indexOf(f.id)<0)continue;
     if(!e.all&&(e.x-cx)*(e.x-cx)+(e.y-cy)*(e.y-cy)>1500*1500)continue;E.push(e)}
   c.evi=NET.evBase+NET.ev.length;
-  return{k:'s',T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,D,E:E.length>70?E.slice(-70):E};
+  return{k:'s',T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
 }
 function netHostTick(dt){
   if(!NET.live)return;
@@ -289,7 +293,7 @@ function netOnStart(d){
 function netApplyDrop(d){
   const fs=G.fighters.slice(0,N_FIGHT);
   G.fighters=fs;NET.zm.clear();
-  fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
+  fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
   G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
   G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
@@ -303,7 +307,7 @@ function netApplySnap(d){
     if(nm==='ending'&&G.mode!=='ending'){G.winner=fs[d.w]||null;SFX.sting(d.w===NET.my)}
     if(!(G.mode==='ending'&&nm!=='ending'))G.mode=nm;
   }
-  G.time=d.T;G.countdown=d.cd;G.endT=d.et;
+  G.time=d.T;G.countdown=d.cd;G.endT=d.et;if(d.bo)G.bo={s:d.bo[0],t:d.bo[1]};
   // self
   {const t=d.me,hp0=P.hp;P.alive=!!t[0];
     const o=1+FK.length,dsp=t[o+XK.indexOf('dashSp')];
@@ -327,7 +331,7 @@ function netApplySnap(d){
         if(k==='healKind'){f.healKind=v===1?'band':v===2?'kit':null;continue}
         f[k]=v}
       f.tx=t[3];f.ty=t[4];f.tf=t[5];if(!f.known||!f.alive){f.x=f.tx;f.y=f.ty;f.facing=f.tf}f.known=true;
-    }else{f.tx=t[3];f.ty=t[4];f.known=false;f.x=f.tx;f.y=f.ty}
+    }else{f.tx=t[3];f.ty=t[4];f.known=false;f.x=f.tx;f.y=f.ty;if(t.length>5){f.hp=t[5];f.tagT=t[6];f.tagBy=t[7]}}
     if(!f.alive){f.x=f.tx;f.y=f.ty}
   }
   // zombies (sent every other snapshot)
@@ -378,7 +382,7 @@ function netReplay(e){
       if(e.id===NET.my){G.spectating=true;G.pOut=true;G.elimT=1.7;try{navigator.vibrate&&navigator.vibrate([40,40,80])}catch(_){}}break}
   }
 }
-const DECAY=['muzzle','swingT','hitFlash','parryT','rdT','inv','dashCD','healT','shF','hurtT','cloakT','burnT','slowT','markT','dashT','reloadT','swingT','pingT'];
+const DECAY=['muzzle','swingT','hitFlash','parryT','rdT','inv','dashCD','healT','shF','hurtT','cloakT','burnT','slowT','markT','dashT','reloadT','swingT','pingT','tagT','scanWarn','litT','fenceT','downT'];
 function netClientUpdate(dt){
   const P=G.P,fs=G.fighters;
   if(G.mode==='count'){G.countdown-=dt;if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
@@ -394,6 +398,7 @@ function netClientUpdate(dt){
   }
   for(const b of G.bullets){b.x+=b.vx*dt;b.y+=b.vy*dt}
   for(const o of G.orbs)o.t+=dt;
+  if(G.bo)G.bo.t-=dt;
   if(G.mode==='ending')return;
   // own fighter: input, prediction
   if(P.alive&&(G.mode==='play'||G.mode==='count')){
@@ -403,7 +408,7 @@ function netClientUpdate(dt){
       else{
         let vx,vy;
         if(P.dashT>0){vx=Math.cos(P.dashDir)*P.dashSp;vy=Math.sin(P.dashDir)*P.dashSp;if(Math.random()<.9)G.fx.push({kind:'ghost',x:P.x,y:P.y,age:0,life:.18,col:COL.you})}
-        else{const fx=P.st.fx,sp=SPEED*CHARS[P.weapon].spd*(1+.08*(fx.fleet||0))*(P.healT>0?.5:1)*(P.slowT>0?1-P.slowAmt:1);vx=P.mv.x*sp;vy=P.mv.y*sp}
+        else{const fx=P.st.fx,sp=SPEED*CHARS[P.weapon].spd*(1+.08*(fx.fleet||0))*(P.healT>0?.5:1)*(P.slowT>0?1-P.slowAmt:1)*moveSp(P);vx=P.mv.x*sp;vy=P.mv.y*sp}
         P.x+=vx*dt;P.y+=vy*dt;collide(P);
       }
     }
@@ -412,25 +417,27 @@ function netClientUpdate(dt){
   if(performance.now()-NET.lastIn>=33||NET.acts.length){NET.lastIn=performance.now();netSendInput()}
 }
 function controlNet(dt){
-  const p=G.P;let mx=0,my=0,fire=false;
+  const p=G.P;let mx=0,my=0,fire=false;p.tgtPt=null;
   if(ov.hidden&&G.mode==='play'){
     const ms=stickVec(sticks.move);mx=ms.x;my=ms.y;
     if(kd('up'))my-=1;if(kd('down'))my+=1;if(kd('left'))mx-=1;if(kd('right'))mx+=1;
     const mm=Math.hypot(mx,my);if(mm>1){mx/=mm;my/=mm}
     const as=stickVec(sticks.aim);
     if(sticks.aim&&as.m>0.22){p.facing=Math.atan2(as.y,as.x);fire=true}
-    else if(G.mouseMode){const z=zoom();const wx=(mouse.x-innerWidth/2)/z+G.cam.x,wy=(mouse.y-innerHeight/2)/z+G.cam.y;p.facing=Math.atan2(wy-p.y,wx-p.x);fire=mouse.down}
+    else if(G.mouseMode){const z=zoom();const wx=(mouse.x-innerWidth/2)/z+G.cam.x,wy=(mouse.y-innerHeight/2)/z+G.cam.y;p.facing=Math.atan2(wy-p.y,wx-p.x);p.tgtPt={x:wx,y:wy};fire=mouse.down}
     else if(mm>0.15)p.facing=turnToward(p.facing,Math.atan2(my,mx),12*dt);
+    if(p.down){fire=false;dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false}
+    if(zoomQueued){zoomQueued=false;if(p.weapon==='sniper'&&p.alive){NET.acts.push(['z']);p.zoom=p.zoom?0:1}}
     if(dashQueued){dashQueued=false;
       if(p.dashCD<=0&&p.dashT<=0&&p.jumpT<=0){p.dashSp=DASH_SPEED;p.dashDir=Math.hypot(mx,my)>.1?Math.atan2(my,mx):p.facing;p.dashT=DASH_T;p.inv=INV_T;p.dashCD=DASH_CD;p.healT=0;p.healKind=null;NET.acts.push(['d',q2(mx),q2(my)])}}
     if(G.molo>0){G.molo-=dt;if(G.molo<=0)G.molo=0}
     if(healQueued){const k=healQueued;healQueued=null;NET.acts.push(['h',k==='band'?1:2])}
     if(abQueued){abQueued=false;
       if(p.weapon==='revolver'){if(G.molo>0)G.molo=0;else if((p.abCD<=0||p.abCh>0)&&p.dashT<=0)G.molo=5}
-      else NET.acts.push(['a'])}
+      else NET.acts.push(p.weapon==='crossbow'&&p.tgtPt?['a',q2(p.tgtPt.x),q2(p.tgtPt.y)]:['a'])}
     if(keys.has('KeyR')&&performance.now()-NET.keyR>400){NET.keyR=performance.now();NET.acts.push(['r'])}
-  }else{dashQueued=false;abQueued=false;healQueued=null}
-  p.mv={x:mx,y:my};p.wantFire=fire;
+  }else{dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false}
+  p.mv={x:mx,y:my};p.wantFire=fire&&!p.down;
 }
 function netSendInput(){
   const P=G.P;if(!P||NET.m!=='client')return;
@@ -440,12 +447,13 @@ function netSendInput(){
 function netClientResults(d){
   const fs=G.fighters.slice(0,N_FIGHT),P=G.P;
   d.st.forEach((s,i)=>{const f=fs[i];f.wins=s[0];f.pts=s[1];f.kills=s[2];f.place=s[3];f.dropKills=s[4];f.level=s[5]});
-  G.winner=fs[d.w];G.mode=d.fin?'over':'between';G.pickCtx='between';NET.pk=d.pk;NET.tot=d.pk;NET.picks=[];G.pending=0;
+  G.winner=fs[d.w];G.reel=d.reel||null;G.mode=d.fin?'over':'between';G.pickCtx='between';NET.pk=d.pk;NET.tot=d.pk;NET.picks=[];G.pending=0;
   if(d.fin){
     showHUD(false);const champ=standings()[0];
     show(`<p class="eyebrow">Match over</p><h2>${champ===P?'You win the match':isAlly(champ,P)?'Your team wins the match':esc(champ.name)+' wins the match'}</h2>
       <p class="lede">You placed #${P.place} in the last drop.</p>${standingsHTML(8)}${buildHTML()}
-      <p class="lede">The host can start another match from the lobby.</p><div class="row"><button class="go ghost" data-act="menu">Leave</button></div>`);
+      <p class="lede">${NET.role==='host'?'Start another match with the same players and settings.':'Waiting for the room leader to start a rematch.'}</p><div class="row">${netEndRow()}</div>`);
+    if(G.reel)setTimeout(()=>{if(G.mode==='over'&&!REEL.on)reelOpen()},900);
     return;
   }
   netShowOffers(true);

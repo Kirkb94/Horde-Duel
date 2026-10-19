@@ -20,7 +20,7 @@ let PAGE = null;
 const loadGame = () => { if (!PAGE) PAGE = loadPage(fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')); return PAGE; };
 const perf = { ticks: 0, ms: 0, max: 0 };
 const PUBLIC = process.env.PUBLIC_DIR || path.join(__dirname, 'public');
-const WEAPONS = ['pistol', 'revolver', 'smg', 'rifle', 'shotgun', 'rocket', 'sword', 'sniper'];
+const WEAPONS = ['pistol', 'revolver', 'smg', 'rifle', 'shotgun', 'rocket', 'sword', 'sniper', 'crossbow', 'carbine', 'scorch'];
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
 const server = http.createServer((req, res) => {
@@ -197,6 +197,14 @@ wss.on('connection', (ws, req) => {
             if ([...rooms.values()].filter(r => r.sim).length >= MAX_MATCHES) return send(ws, { t: 'err', msg: 'The server is running as many matches as it can. Try again shortly.' });
             try { room.started = true; startSim(room, m.diff); } catch (e) { console.error('start failed', e); room.started = false; stopSim(room); return send(ws, { t: 'err', msg: 'Could not start the match on the server.' }); }
           } else room.started = true;
+          bcastPlayers(room);
+        } return;
+      case 'rematch':
+        if (room && p && p.pid === room.host && room.started) {
+          if (room.auth) {
+            stopSim(room);
+            try { room.started = true; startSim(room, m.diff); } catch (e) { console.error('rematch failed', e); room.started = false; stopSim(room); send(ws, { t: 'err', msg: 'Could not start the rematch.' }); }
+          }
           bcastPlayers(room);
         } return;
       case 'lobby': if (room && p && p.pid === room.host) { stopSim(room); room.started = false; bcastPlayers(room); } return;

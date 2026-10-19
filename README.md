@@ -43,3 +43,6 @@ Open it in several browser windows: create a room in one, join with the code in 
 
 ## Game modes
 The room leader picks the mode in the lobby: **Battle royale** (lobby size slider 2–16, empty slots are bots), **1v1** (2 players) and **2v2** (4 players, each picks Team A/B; teammates cannot hurt each other). 1v1/2v2 use a small arena with a light zombie horde, first to 3 round wins. Solo play has the same modes in the main menu (2v2 solo = you + a bot ally vs two bots).
+
+## Rematch and highlights
+When a match ends, the room leader gets **Rematch** (same players, mode, teams and lobby size; everyone else sees a waiting note) or **Back to lobby**. Everyone gets a **Highlights** replay: the sim records the match at 10 samples a second and picks the best five moments (multi-kills, final blows, long shots, clutch kills). The reel is sent once with the final results, about 50 to 100 KB.
