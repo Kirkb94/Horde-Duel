@@ -443,7 +443,7 @@ function netClientResults(d){
   G.winner=fs[d.w];G.mode=d.fin?'over':'between';G.pickCtx='between';NET.pk=d.pk;NET.tot=d.pk;NET.picks=[];G.pending=0;
   if(d.fin){
     showHUD(false);const champ=standings()[0];
-    show(`<p class="eyebrow">Match over · ${cap(G.diff)} bots</p><h2>${champ===P?'You win the match':esc(champ.name)+' wins the match'}</h2>
+    show(`<p class="eyebrow">Match over</p><h2>${champ===P?'You win the match':isAlly(champ,P)?'Your team wins the match':esc(champ.name)+' wins the match'}</h2>
       <p class="lede">You placed #${P.place} in the last drop.</p>${standingsHTML(8)}${buildHTML()}
       <p class="lede">The host can start another match from the lobby.</p><div class="row"><button class="go ghost" data-act="menu">Leave</button></div>`);
     return;
