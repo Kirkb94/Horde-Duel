@@ -225,9 +225,6 @@ wss.on('connection', (ws, req) => {
           bcastPlayers(room);
         } return;
       case 'lobby': if (room && p && p.pid === room.host) { clearHolds(room); stopSim(room); room.started = false; bcastPlayers(room); } return;
-      case 'rejoin':
-        if (MODE === 'relay') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server" });
-        return;                                        // auth-mode rejoin: handled by the separate rejoin task
       case 'rejoin': {
         if (MODE !== 'auth') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server." });
         const r = rooms.get(clean(m.code, 4).toUpperCase());
