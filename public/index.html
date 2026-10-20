@@ -1065,7 +1065,7 @@ const SFX=(()=>{
       else if(k==='rocket'){thump(70,35,.3,.9);noise({bus:b,dur:.6,f0:700,f1:150,q:.8,gain:.85,at:.05});tone({bus:b,f0:100,f1:48,dur:.4,type:'sawtooth',gain:.3,lp:380,at:.05})}
       else if(k==='crossbow'){tone({bus:b,f0:560*pr,f1:170,dur:.2,type:'triangle',gain:.5,at:.002});noise({bus:b,dur:.05,f0:2800,type:'highpass',gain:.5,at:.0006});noise({bus:b,dur:.14,f0:3400,f1:800,q:3,gain:.35,at:.002})}
       else if(k==='carbine'){crack(.04,1,2600);body(.1,1700,500,.8,.7);thump(210,70,.09,.6);slap(.1,.2,1400,.2)}
-      else if(k==='scorch'){noise({bus:b,dur:.15,f0:1300,f1:450,q:.6,gain:.5,at:.012});tone({bus:b,f0:120*pr,f1:70,dur:.13,type:'sawtooth',gain:.18,lp:500,at:.01})}
+      else if(k==='scorch'){noise({bus:b,dur:.24,f0:1100*pr,f1:700,q:.45,gain:.3,at:.035});noise({bus:b,dur:.26,f0:380*pr,type:'lowpass',q:.5,gain:.38,at:.04});if(Math.random()<.35)noise({bus:b,dur:.04,f0:3200+Math.random()*2500,type:'highpass',q:.7,gain:.22,at:.001,delay:Math.random()*.1})}
       else if(k==='sword'){noise({bus:b,dur:.17,f0:3600,f1:850,q:2.4,gain:.65,at:.025});tone({bus:b,f0:2300*pr,f1:1800,dur:.22,gain:.05,at:.02})}
     },
     snarl(x,y){
@@ -3898,6 +3898,19 @@ function render0(){
       ctx.fillStyle=rgba('#ffe9a8',.9);ctx.beginPath();ctx.moveTo(-8,-1.8);ctx.lineTo(-8-fl*.55,0);ctx.lineTo(-8,1.8);ctx.closePath();ctx.fill();
       ctx.fillStyle='#f2e3b3';ctx.fillRect(-8,-3.5,15,7);ctx.fillStyle='#ff9f1c';ctx.beginPath();ctx.moveTo(7,-3.5);ctx.lineTo(13,0);ctx.lineTo(7,3.5);ctx.closePath();ctx.fill();
       ctx.fillRect(-9,-6,4,12);ctx.restore();continue}
+    if(b.owner&&b.owner.weapon==='scorch'&&!b.expl){
+      if(!b._t0)b._t0=performance.now();
+      const k=clamp((performance.now()-b._t0)/1000/.36,0,1),ang=Math.atan2(b.vy,b.vx),rad0=b.r*(1+k*3.2);
+      ctx.save();ctx.globalCompositeOperation='lighter';
+      const a=1-k*k;
+      ctx.fillStyle=rgba(k<.35?'#ffe9a8':(k<.7?'#ff8a1f':'#c4310f'),.5*a+.05);
+      ctx.beginPath();ctx.arc(b.x,b.y,rad0,0,TAU);ctx.fill();
+      if(k<.6){ctx.fillStyle=rgba('#fff4c8',.6*(1-k/.6));ctx.beginPath();ctx.arc(b.x,b.y,rad0*.45,0,TAU);ctx.fill()}
+      ctx.save();ctx.translate(b.x,b.y);ctx.rotate(ang);
+      ctx.fillStyle=rgba('#ff9f1c',.45*a);ctx.beginPath();ctx.moveTo(-rad0*.6,-rad0*.6);ctx.lineTo(rad0*(1.2+Math.random()*.6),0);ctx.lineTo(-rad0*.6,rad0*.6);ctx.closePath();ctx.fill();ctx.restore();
+      ctx.restore();
+      if(k>.75){ctx.fillStyle=rgba('#555',.18*(1-k)*4);ctx.beginPath();ctx.arc(b.x,b.y-4*k,rad0*.8,0,TAU);ctx.fill()}
+      continue}
     const col=b.expl?FIRE:(((b.owner===P||isAlly(P,b.owner))&&!G.debug)?COL.you:COL.foe),sp=Math.hypot(b.vx,b.vy);
     ctx.strokeStyle=rgba(col,.35);ctx.lineWidth=b.r*2.4;ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-b.vx/sp*14,b.y-b.vy/sp*14);ctx.stroke();
     ctx.fillStyle=col;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,TAU);ctx.fill();
@@ -4056,7 +4069,8 @@ function updateHUD(){
   E.kills.textContent=`${P.dropKills} kill${P.dropKills===1?'':'s'} · ${P.zk||0} zombies`;E.wins.textContent=G.zmode?'Survive':`${P.wins} win${P.wins===1?'':'s'}`;
   const s=Math.max(0,Math.ceil(st.left));
   const zd=Math.hypot(P.x-st.cx,P.y-st.cy)-st.r;
-  E.storm.textContent=st.shrinking?'Horde advancing · '+s+'s'+(G.zmode?'':(zd>0?' · '+Math.round(zd)+' to safe':' · inside')):st.next?`Horde surges in ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`:'Last stand';
+  E.storm.textContent=st.shrinking?'Horde advancing · '+s+'s'+(G.zmode?'':(zd>0?' · '+Math.round(zd)+' to safe':' · inside')):st.next?`Horde surges in ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} · more zombies spawn`:'Last stand';
+  if(st.next&&!st.shrinking&&s<=20&&!G.debug&&!G.spectating&&P.alive&&!G.surgeTip){G.surgeTip=true;try{if(!localStorage.getItem('hordesurge')){localStorage.setItem('hordesurge','1');feedAdd('Horde surge incoming: the zone shrinks and more zombies spawn. Find cover and stock up.',true)}}catch(e){}}
   const sp=G.spectating;
   E.dash.hidden=!ov.hidden||(sp?G.mode!=='play':false);
   E.dash.textContent=sp?(G.debug?SPEEDS[G.speedIdx]+'×':(NET.m?'NEXT':(G.ff?'1×':'SKIP'))):'DASH';
