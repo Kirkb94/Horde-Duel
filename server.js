@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { WebSocketServer } = require('ws');
 const { loadPage, createSim } = require('./sim');
 
@@ -24,7 +25,7 @@ const loadGame = () => { if (!PAGE) PAGE = loadPage(fs.readFileSync(path.join(PU
 const perf = { ticks: 0, ms: 0, max: 0, errors: 0, aborts: 0 };
 const SIM_MAX_CONSEC = +(process.env.SIM_MAX_CONSEC || 5);    // consecutive failed ticks before the match is ended
 const SIM_MAX_TOTAL = +(process.env.SIM_MAX_TOTAL || 30);     // total failed ticks in one match before it is ended
-const PUBLIC = process.env.PUBLIC_DIR || path.join(__dirname, 'public');
+const PUBLIC = path.resolve(process.env.PUBLIC_DIR || path.join(__dirname, 'public'));
 const WEAPONS = ['pistol', 'revolver', 'smg', 'rifle', 'shotgun', 'rocket', 'sword', 'sniper', 'crossbow', 'carbine', 'scorch'];
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
@@ -43,16 +44,56 @@ const server = http.createServer((req, res) => {
     if (cmd === 'winner') { const q = new URL(req.url, 'http://x').searchParams, keep = +(q.get('keep') || 0); for (const f of G.fighters.slice(0, 16)) if (f.id !== keep) f.alive = false; if (q.get('wins')) G.fighters[keep].wins = +q.get('wins'); }
     res.writeHead(200); return res.end('ok');
   }
-  let file = url === '/' ? '/index.html' : url;
-  file = path.normalize(file).replace(/^(\.\.[\/\\])+/, '');
-  const full = path.join(PUBLIC, file);
-  if (!full.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
-  fs.readFile(full, (err, data) => {
-    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
-    res.end(data);
-  });
+  serveStatic(req, res, url);
 });
+
+// ---- static file serving: safe paths, security headers, in-memory cache with gzip + ETag ----
+const SEC_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Referrer-Policy': 'no-referrer',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Content-Security-Policy': "frame-ancestors 'self'"
+};
+const GZIP_EXT = new Set(['.html', '.js', '.css', '.json', '.svg']);
+const staticCache = new Map();   // full path -> { mtimeMs, size, etag, data, gz }
+function plain(res, code, msg) { res.writeHead(code, Object.assign({ 'Content-Type': 'text/plain' }, SEC_HEADERS)); res.end(msg || ''); }
+function serveStatic(req, res, url) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, Object.assign({ Allow: 'GET, HEAD' }, SEC_HEADERS)); return res.end(); }
+  let rel;
+  try { rel = decodeURIComponent(url); } catch (e) { return plain(res, 400, 'Bad request'); }
+  if (rel.indexOf('\0') !== -1 || rel.indexOf('\\') !== -1) return plain(res, 400, 'Bad request');
+  rel = path.posix.normalize('/' + rel);
+  if (rel.endsWith('/')) rel += 'index.html';
+  if (rel.split('/').some(s => s.startsWith('.'))) return plain(res, 404, 'Not found');
+  const full = path.join(PUBLIC, rel);
+  if (full !== PUBLIC && !full.startsWith(PUBLIC + path.sep)) return plain(res, 403, 'Forbidden');
+  const respond = c => {
+    const headers = Object.assign({ 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'ETag': c.etag, 'Vary': 'Accept-Encoding' }, SEC_HEADERS);
+    if (String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') headers['Strict-Transport-Security'] = 'max-age=15552000';
+    const inm = req.headers['if-none-match'];
+    if (inm && inm.split(',').some(t => t.trim().replace(/^W\//, '') === c.etag)) { res.writeHead(304, headers); return res.end(); }
+    let body = c.data;
+    if (c.gz && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) { body = c.gz; headers['Content-Encoding'] = 'gzip'; }
+    headers['Content-Length'] = body.length;
+    res.writeHead(200, headers);
+    res.end(req.method === 'HEAD' ? undefined : body);
+  };
+  fs.stat(full, (err, st) => {
+    if (err || !st.isFile()) return plain(res, 404, 'Not found');
+    const c = staticCache.get(full);
+    if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return respond(c);
+    fs.readFile(full, (err2, data) => {
+      if (err2) return plain(res, 404, 'Not found');
+      const entry = { mtimeMs: st.mtimeMs, size: st.size, etag: '"' + crypto.createHash('sha1').update(data).digest('base64').replace(/=+$/, '') + '"', data, gz: null };
+      const done = () => { staticCache.set(full, entry); respond(entry); };
+      if (data.length > 1024 && GZIP_EXT.has(path.extname(full))) {
+        zlib.gzip(data, { level: 9 }, (e, z) => { if (!e && z.length < data.length) entry.gz = z; done(); });
+      } else done();
+    });
+  });
+}
 
 server.on('connection', s => s.setNoDelay(true));
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 256 * 1024, perMessageDeflate: process.env.DEFLATE === '0' ? false : { threshold: 600, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: true, clientNoContextTakeover: true, concurrencyLimit: 10 } });
@@ -87,6 +128,60 @@ function roomLimited(ws) {
 
 const clean = (s, n) => String(s == null ? '' : s).replace(/[^\w \-.!?]/g, '').trim().slice(0, n);
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
+// Per-connection message limits: lobby traffic and game input are counted separately.
+const LOBBY_PER_SEC = +(process.env.LOBBY_MSGS_PER_SEC || 20);
+const GAME_PER_SEC = +(process.env.GAME_MSGS_PER_SEC || (MODE === 'auth' ? 150 : 700));   // relay host forwards snapshots to every peer
+const JOIN_PER_10S = +(process.env.JOIN_PER_10S || 15);       // join / quick / rejoin (limits room-code guessing)
+const MAX_LOBBY_BYTES = 2048;
+const MAX_GAME_BYTES = 4096;                                   // auth mode only; relay snapshots can be large
+const MAX_DROPS = 3000;                                        // drop count after which a connection is terminated
+function msgAllowed(ws, t, len) {
+  const now = Date.now();
+  let ok = true;
+  if (t === 'r') {
+    if (MODE === 'auth' && len > MAX_GAME_BYTES) ok = false;
+    else { if (now - ws.gWin >= 1000) { ws.gWin = now; ws.gN = 0; } ok = ++ws.gN <= GAME_PER_SEC; }
+  } else {
+    if (len > MAX_LOBBY_BYTES) ok = false;
+    else {
+      if (now - ws.lWin >= 1000) { ws.lWin = now; ws.lN = 0; ws.lWarned = false; }
+      if (++ws.lN > LOBBY_PER_SEC) {
+        ok = false;
+        if (!ws.lWarned) { ws.lWarned = true; send(ws, { t: 'err', msg: 'Slow down: too many requests.' }); }
+      } else if (t === 'join' || t === 'quick' || t === 'rejoin') {
+        if (now - ws.jWin >= 10000) { ws.jWin = now; ws.jN = 0; }
+        if (++ws.jN > JOIN_PER_10S) { ok = false; send(ws, { t: 'err', msg: 'Too many join attempts. Wait a few seconds and try again.' }); }
+      }
+    }
+  }
+  if (!ok && ++ws.drops > MAX_DROPS) { try { ws.terminate(); } catch (e) {} }
+  return ok;
+}
+
+// Auth mode: rebuild a client's game payload from a whitelist before it reaches the simulation.
+const ACT_KEYS = ['a', 'd', 'h', 'm', 'r', 'u', 'z'];
+const numIn = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
+function cleanGameMsg(d) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  if (d.k === 'i') {
+    const out = { k: 'i', mx: numIn(d.mx, -1, 1), my: numIn(d.my, -1, 1), f: numIn(d.f, -1e4, 1e4), fr: d.fr ? 1 : 0, a: [] };
+    if (Array.isArray(d.a)) for (const a of d.a.slice(0, 6)) {
+      if (!Array.isArray(a) || typeof a[0] !== 'string' || !ACT_KEYS.includes(a[0])) continue;
+      out.a.push([a[0]].concat(a.slice(1, 3).map(v => numIn(v, -1e5, 1e5))));
+    }
+    if (typeof d.sv === 'number' && Number.isFinite(d.sv)) out.sv = Math.round(numIn(d.sv, -1, 1000));
+    return out;
+  }
+  if (d.k === 'ready') {
+    const picks = [];
+    if (Array.isArray(d.picks)) for (const p of d.picks.slice(0, 8)) {
+      if (Array.isArray(p) && typeof p[0] === 'string' && /^[A-Za-z][\w-]{0,31}$/.test(p[0]) && !(p[0] in Object.prototype)) picks.push([p[0], 1]);
+    }
+    return { k: 'ready', picks };
+  }
+  return null;
+}
 function newCode() {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   for (let k = 0; k < 50; k++) {
@@ -212,12 +307,14 @@ wss.on('connection', (ws, req) => {
   }
   ipConns.set(ws.ip, nConn);
   ws.isAlive = true; ws.msgs = 0; ws.room = null; ws.p = null;
+  ws.gWin = ws.lWin = ws.jWin = 0; ws.gN = ws.lN = ws.jN = 0; ws.drops = 0; ws.lWarned = false;
   ws.on('pong', () => { ws.isAlive = true; });
   const rate = setInterval(() => { ws.msgs = 0; }, 1000);
   ws.on('message', (raw) => {
     if (++ws.msgs > 700) return;                      // flood guard
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m.t !== 'string') return;
+    if (!msgAllowed(ws, m.t, raw.length)) return;
     const room = ws.room, p = ws.p;
     switch (m.t) {
       case 'ping': return send(ws, { t: 'pong', ts: m.ts });
@@ -298,7 +395,7 @@ wss.on('connection', (ws, req) => {
       case 'leave': return leaveRoom(ws);
       case 'r': {                                      // relay: client -> host, host -> peer or everyone
         if (!room || !p) return;
-        if (room.auth) { if (room.sim) { try { room.sim.api.recv(p.pid, m.d); } catch (e) {} } return; }
+        if (room.auth) { if (room.sim) { const d = cleanGameMsg(m.d); if (d) { try { room.sim.api.recv(p.pid, d); } catch (e) {} } } return; }
         if (p.pid === room.host) {
           if (m.to === '*') { const out = JSON.stringify({ t: 'r', from: p.pid, d: m.d }); for (const q of room.players.values()) if (q !== p && q.ws.readyState === 1) q.ws.send(out); }
           else { const q = room.players.get(m.to); if (q && q.ws.readyState === 1) {
