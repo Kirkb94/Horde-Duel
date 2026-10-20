@@ -173,10 +173,10 @@ function netLobby(){
   ${tm&&me?`<div class="group"><span class="glabel">Your team</span><div class="seg"><button data-act="n_team" data-v="0" aria-pressed="${me.team!==1}">Team A</button><button data-act="n_team" data-v="1" aria-pressed="${me.team===1}">Team B</button></div></div>`:''}
   ${host?`<div class="group"><span class="glabel">Mode</span><div class="seg">${Object.entries(MODES).map(([k,v])=>`<button data-act="n_mode" data-v="${k}" aria-pressed="${cfg.mode===k}">${v}</button>`).join('')}</div></div>
   <div class="group"><span class="glabel">Map</span><div class="seg" style="grid-template-columns:repeat(4,1fr)">${[['random','Random'],...Object.entries(MAPS).map(([k,v])=>[k,v.name])].map(([k,v])=>`<button data-act="n_map" data-v="${k}" aria-pressed="${(cfg.map||'random')===k}">${v}</button>`).join('')}</div></div>
-  ${cfg.mode==='br'?`<div class="group"><span class="glabel">Lobby size · <b id="nsizeV">${cfg.size}</b> fighters (empty slots are bots)</span><input class="nin" type="range" id="nsize" min="${Math.max(2,NET.players.length)}" max="16" value="${cfg.size}" style="padding:6px"></div>`:`<p class="lede">${cfg.mode==='duel'?'1v1: a small arena with a light zombie horde. First to 3 round wins.':'2v2: two teams of two, pick yours above. Bots fill empty team slots. Allies cannot hurt each other.'}</p>`}
+  ${cfg.mode==='br'?`<div class="group"><label class="glabel" for="nsize">Lobby size · <b id="nsizeV">${cfg.size}</b> fighters (empty slots are bots)</label><input class="nin" type="range" id="nsize" min="${Math.max(2,NET.players.length)}" max="16" value="${cfg.size}" style="padding:6px"></div>`:`<p class="lede">${cfg.mode==='duel'?'1v1: a small arena with a light zombie horde. First to 3 round wins.':'2v2: two teams of two, pick yours above. Bots fill empty team slots. Allies cannot hurt each other.'}</p>`}
   <div class="group"><span class="glabel">Bot skill</span><div class="seg">${Object.keys(DIFF).map(k=>`<button data-act="diff" data-v="${k}" aria-pressed="${G.diff===k}">${cap(k)}</button>`).join('')}</div></div>`:''}
   <details class="how"><summary>Change character</summary>${wepGrid()}</details>
-  ${host?'<button class="go" data-act="n_start">Start match</button>':''}
+  ${host?'<div class="pfoot"><button class="go" data-act="n_start">Start match</button></div>':''}
   <button class="go ghost" data-act="n_leave">Leave room</button>`);
 }
 function netAct2(act,v){
@@ -261,7 +261,7 @@ function controlRemote(f,dt){
     else if(a[0]==='h'){const k=a[1]===1?'band':'kit';if(f.healT>0){f.healT=0;f.healKind=null}else startHeal(f,k)}
     else if(a[0]==='a'){if(f.weapon!=='revolver'){if(f.weapon==='crossbow'&&a.length>2)f.tgtPt={x:+a[1]||f.x,y:+a[2]||f.y};useAbility(f);f.tgtPt=null}}
     else if(a[0]==='z')toggleZoom(f);
-    else if(a[0]==='u')usePanel(f);
+    else if(a[0]==='u')usePanel(f,40);
     else if(a[0]==='m'&&f.weapon==='revolver'){
       const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,Math.min(d,rayCast(f.x,f.y,ang,d+30)-10));
       f.facing=ang;f.throwTarget={x:f.x+Math.cos(ang)*w,y:f.y+Math.sin(ang)*w};useAbility(f);f.throwTarget=null}
@@ -342,7 +342,7 @@ function netSnapFor(c){
       if(dx*dx+dy*dy<ZR2)Z.push(z.id*8+Math.max(0,ZKS.indexOf(z.zk)),Math.round(z.x),Math.round(z.y),Math.round(z.facing*10),Math.max(1,Math.round(z.hp/z.zhp*100))+101*Math.min(1,Math.round(z.hitFlash*10))+202*Math.min(3,Math.round(z.swingT*10)))}}
   const B=[];for(const b of G.bullets){const dx=b.x-cx,dy=b.y-cy;if(dx*dx+dy*dy<1000*1000)B.push([b.owner.id,Math.round(b.x),Math.round(b.y),Math.round(b.vx),Math.round(b.vy),Math.round(b.r*10),b.expl?1:0])}
   let O;if(c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
-  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
+  let M;if(c.n%4===3||c.n<3||c.mapv!==MAPV)M=(c.mapv=MAPV,DYN).map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
   const D=[];for(const d of G.deploys){const dx=d.x-cx,dy=d.y-cy;if(dx*dx+dy*dy>1100*1100)continue;
     const o={};for(const k in d){const v=d[k];if(k==='owner')o.oid=v.id;else if(typeof v==='number')o[k]=q2(v);else if(typeof v==='string'||typeof v==='boolean')o[k]=v}D.push(o)}
   const E=[];const from=Math.max(0,c.evi-NET.evBase);

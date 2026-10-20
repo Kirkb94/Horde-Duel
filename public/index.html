@@ -113,9 +113,12 @@ html[data-plat=phone] #abBtn.rdy{box-shadow:0 0 0 4px rgba(138,99,255,.4),0 0 16
 #reelBar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);display:flex;align-items:center;gap:10px;z-index:30;font:700 12px Oxanium,sans-serif;color:var(--muted)}
 #reelBar[hidden]{display:none}
 #reelBar button{font:700 13px Oxanium,sans-serif;color:var(--ink);background:rgba(20,28,32,.85);border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-height:44px;cursor:pointer}
+#panel.elim{background:#0b0d10;border-color:#a3202a;box-shadow:0 0 0 1px rgba(0,0,0,.6),0 12px 40px rgba(0,0,0,.7)}
 #panel{width:100%;max-width:520px;max-height:100%;overflow-y:auto;touch-action:pan-y;
   background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:22px 20px;
   display:flex;flex-direction:column;gap:16px}
+.pfoot{position:sticky;bottom:0;z-index:2;display:flex;flex-direction:column;margin:0 -20px -22px;padding:10px 20px 22px;background:var(--panel)}
+.pfoot::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:14px;background:linear-gradient(to top,var(--panel),transparent);pointer-events:none}
 .eyebrow{margin:0;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--storm)}
 h1{margin:0;font-size:clamp(40px,11vw,60px);line-height:.9;font-weight:800;letter-spacing:-.02em;text-wrap:balance;text-transform:uppercase}
 h1 em{font-style:normal;color:var(--you)}
@@ -655,6 +658,15 @@ function drawDecor(vx0,vx1,vy0,vy1){
     else if(id==='hotel'){for(let x=r.x+50;x<r.x+r.w;x+=50){ctx.moveTo(x,r.y);ctx.lineTo(x-r.h*.35,r.y+r.h)}for(let x=r.x-r.h;x<r.x+r.w;x+=50){ctx.moveTo(x,r.y+r.h);ctx.lineTo(x+r.h*.35,r.y)}}
     else{for(let x=r.x+50;x<r.x+r.w;x+=50){ctx.moveTo(x,r.y);ctx.lineTo(x,r.y+r.h)}for(let y=r.y+50;y<r.y+r.h;y+=50){ctx.moveTo(r.x,y);ctx.lineTo(r.x+r.w,y)}}
     ctx.stroke()}
+  // nav markers: green ticks on building corners, green dots at doorways and gaps
+  ctx.save();ctx.strokeStyle='rgba(107,227,138,.6)';ctx.lineWidth=3;ctx.lineCap='round';ctx.beginPath();
+  for(const r of INTER){if(r.x>vx1||r.x+r.w<vx0||r.y>vy1||r.y+r.h<vy0)continue;const L=Math.min(22,r.w/3,r.h/3);
+    for(const [cx,cy,sx,sy] of [[r.x,r.y,1,1],[r.x+r.w,r.y,-1,1],[r.x,r.y+r.h,1,-1],[r.x+r.w,r.y+r.h,-1,-1]]){ctx.moveTo(cx+sx*L,cy);ctx.lineTo(cx,cy);ctx.lineTo(cx,cy+sy*L)}}
+  ctx.stroke();
+  if(!CHOKES)buildChokes();
+  ctx.fillStyle='rgba(107,227,138,.45)';ctx.beginPath();
+  for(const c of CHOKES){if(c.x<vx0||c.x>vx1||c.y<vy0||c.y>vy1)continue;ctx.moveTo(c.x+4,c.y);ctx.arc(c.x,c.y,4,0,TAU)}
+  ctx.fill();ctx.restore();
   // decals
   for(let ix=Math.max(0,Math.floor(vx0/500));ix<=Math.min(7,Math.floor(vx1/500));ix++)for(let iy=Math.max(0,Math.floor(vy0/500));iy<=Math.min(7,Math.floor(vy1/500));iy++){
     const a=DECOR.b.get(ix*16+iy);if(!a)continue;
@@ -754,13 +766,13 @@ function unlockDoor(d){
   if(!d.on||d.broken)return false;
   dynPark(d);d.on=false;d.hp=0;MAPV++;navLocal(d);if(near(d.cx,d.cy))burst(d.cx,d.cy,'#3fe07a',10,160);noise(d.cx,d.cy,420);return true;
 }
-function nearPanel(f){
-  let best=null,bd=76;
+function nearPanel(f,slack){
+  let best=null,bd=76+(slack||0);
   for(const p of PANELS){if(p.door.broken)continue;const d=Math.hypot(f.x-p.x,f.y-p.y);if(d<bd&&(f.x-p.x)*p.nx+(f.y-p.y)*p.ny>-6){bd=d;best=p}}
   return best;
 }
-function usePanel(f){
-  const p=nearPanel(f);if(!p||(f.useCD||0)>G.time)return false;f.useCD=G.time+.45;
+function usePanel(f,slack){
+  const p=nearPanel(f,slack);if(!p||(f.useCD||0)>G.time)return false;f.useCD=G.time+.45;
   const d=p.door;let ok=false;
   if(d.on)ok=unlockDoor(d);else ok=lockDoor(d);
   p.flash=ok?.5:0;if(!ok&&near(p.x,p.y))burst(p.x,p.y,'#e8573f',5,120);
@@ -1173,6 +1185,26 @@ function hordeAliveMul(){
 function hordeHpMul(){
   return HORDE_TUNE.hpMul*(1+Math.min(HORDE_TUNE.hpGrowthCap,HORDE_TUNE.hpPerMin*(G.time||0)/60));
 }
+// ---------- 2v2 round rules (all team-mode pacing numbers live here) ----------
+const TEAM_TUNE={
+  downT:13,             // seconds a downed fighter bleeds out before elimination
+  maxRevives:2,         // revives allowed per fighter per round; the next lethal hit eliminates
+  reviveTime:3.2,       // base seconds for a teammate to revive
+  reviveSlow:.8,        // +80% revive time per previous revive of the same fighter this round
+  reviveHp:.35,         // health fraction after the first revive
+  reviveHpStep:.08,     // health fraction lost per previous revive
+  reviveHpMin:.15,      // floor for revive health fraction
+  rampStart:30,         // seconds into the round before extra horde pressure begins
+  rampPerMin:1.2,       // extra horde target per minute after rampStart (1.2 = +120%/min)
+  capBonus:16,          // extra horde cap in 2v2 so the ramp is not clipped
+  suddenMul:1.7         // horde target multiplier during sudden death
+};
+function teamPressureMul(){
+  if(!G.cfg||G.cfg.mode!=='team')return 1;
+  const T=TEAM_TUNE;
+  return (1+Math.max(0,(G.time||0)-T.rampStart)*T.rampPerMin/60)*(G.sudden?T.suddenMul:1);
+}
+function teamCapBonus(){return G.cfg&&G.cfg.mode==='team'?TEAM_TUNE.capBonus:0}
 // ---------- Match modes: battle royale (2-16 fighters), 1v1, 2v2 ----------
 const isAlly=(a,b)=>!!a&&!!b&&a!==b&&a.team!==undefined&&a.team===b.team;
 const MODES={br:'Battle royale',duel:'1v1',team:'2v2'};
@@ -1622,9 +1654,9 @@ function domeEnd(d){
 function toggleZoom(f){if(f.weapon!=='sniper'||f.down||!f.alive)return false;f.zoom=!f.zoom;return true}
 // ----- down / revive (team modes) -----
 function mateUp(t){for(const o of G.fighters)if(o!==t&&!o.zomb&&o.alive&&!o.down&&o.team===t.team)return true;return false}
-function fatal(t,src){if(teamMode()&&!t.zomb&&!t.noDown&&mateUp(t))goDown(t,src);else eliminate(t,src)}
+function fatal(t,src){if(teamMode()&&!t.zomb&&!t.noDown&&(t.revN||0)<TEAM_TUNE.maxRevives&&mateUp(t))goDown(t,src);else eliminate(t,src)}
 function goDown(t,src){
-  t.down=true;t.called=false;t.dChk=0;t.crawlDir=null;t.downT=25;t.hp=1;t.revP=0;t.finP=0;t.lastHit=src&&src!==t&&!src.zomb?src:null;
+  t.down=true;t.called=false;t.dChk=0;t.crawlDir=null;t.downT=TEAM_TUNE.downT;t.hp=1;t.revP=0;t.finP=0;t.lastHit=src&&src!==t&&!src.zomb?src:null;
   t.wantFire=false;t.healT=0;t.healKind=null;t.dashT=0;t.cloakT=0;t.queue.length=0;t.zoom=false;t.inv=Math.max(t.inv,.4);t.shield=0;t.shieldT=0;t.burnT=0;
   if(t.fenceN>0)fenceEnd(t);
   SFX.fdie(t.x,t.y,t===G.P);feedAdd(`${t.name==='You'?'You are':t.name+' is'} down`,!G.debug);
@@ -1632,7 +1664,7 @@ function goDown(t,src){
   G.fx.push({kind:'ring',x:t.x,y:t.y,age:0,life:.5,r:40,col:'#ff4d6d'});
 }
 function reviveNow(t,by){
-  t.down=false;t.called=false;t.hp=Math.round(mhp(t)*.35);t.inv=Math.max(t.inv,1.2);t.revP=0;t.finP=0;t.downT=0;
+  t.down=false;t.called=false;t.hp=Math.round(mhp(t)*Math.max(TEAM_TUNE.reviveHpMin,TEAM_TUNE.reviveHp-TEAM_TUNE.reviveHpStep*(t.revN||0)));t.revN=(t.revN||0)+1;t.inv=Math.max(t.inv,1.2);t.revP=0;t.finP=0;t.downT=0;
   G.fx.push({kind:'ring',x:t.x,y:t.y,age:0,life:.5,r:44,col:'#6be38a'});if(near(t.x,t.y))burst(t.x,t.y,'#6be38a',16,220);
   if(by){gainXP(by,40);feedAdd(`${by.name} revived ${t.name}`,!G.debug&&(t===G.P||by===G.P))}
 }
@@ -1649,7 +1681,7 @@ function stepRevive(dt){
       if(Math.hypot(o.x-t.x,o.y-t.y)>56||Math.abs(o.mv.x)+Math.abs(o.mv.y)>.25||o.wantFire)continue;
       if(o.team===t.team){if(!rv)rv=o}else if(!fn)fn=o;
     }
-    if(rv){t.revP+=dt/Math.max(1,3.2*(1-.25*(rv.st.fx.medic||0)))}else t.revP=Math.max(0,t.revP-dt*.6);
+    if(rv){t.revP+=dt/Math.max(1,TEAM_TUNE.reviveTime*(1+TEAM_TUNE.reviveSlow*(t.revN||0))*(1-.25*(rv.st.fx.medic||0)))}else t.revP=Math.max(0,t.revP-dt*.6);
     if(fn&&!rv)t.finP+=dt/1.6;else t.finP=Math.max(0,t.finP-dt*1.2);
     if(t.revP>=1){reviveNow(t,rv);continue}
     if(t.finP>=1||t.downT<=0)finishDown(t,fn||t.lastHit);
@@ -1732,7 +1764,7 @@ function boReset(){G.bo={s:0,t:rnd(28,38)}}
 function boStep(dt){
   const b=G.bo;if(!b||G.zmode)return;
   b.t-=dt;if(b.t>0)return;
-  if(b.s===0){b.s=1;b.t=2.5;SFX.blackout();feedAdd('BLACKOUT INCOMING',true)}
+  if(b.s===0){b.s=1;b.t=2.5;SFX.blackout();feedAdd('BLACKOUT INCOMING: cones narrow, shots light you up',true)}
   else if(b.s===1){
     b.s=2;b.t=12;const st=G.st,o=G.fighters[0];
     for(let n=0,k=0;n<3&&k<60;k++){const a=Math.random()*TAU,r=Math.sqrt(Math.random())*st.r*.7,x=st.cx+Math.cos(a)*r,y=st.cy+Math.sin(a)*r;if(blocked(x,y,40))continue;G.deploys.push({kind:'flare',x,y,owner:o,t:0,life:12.5,R:190});n++}
@@ -2199,6 +2231,7 @@ function eliminate(t,src){
   const left=G.fighters.reduce((n,f)=>n+(f.alive&&!f.zomb?1:0),0);
   t.place=left+1;t.deadT=G.time;
   const by=src&&src!==t?src:null;
+  t.elimBy=by?(by.zomb?'the horde':by.name):(t.stormHit>0?'the storm':'');
   if(by&&!by.zomb){by.kills++;by.dropKills++;gainXP(by,60);by.hp=Math.min(mhp(by),by.hp+25+20*(by.st.fx.bounty||0));if(by.st.fx.refill){by.ammo=by.st.clip;by.reloadT=0}}
   recKill(t,src);
   feedAdd(by?`${by.name} eliminated ${t.name}`:`${t.name} fell`,!G.debug&&(t===G.P||by===G.P));
@@ -2261,6 +2294,30 @@ function firstLockedOnPath(a,path){
       for(const r of DOORS)if(r.on&&px>r.x-26&&px<r.x+r.w+26&&py>r.y-26&&py<r.y+r.h+26)return r}
     x=q.x;y=q.y}
   return null;
+}
+function fenceBeams(a){
+  const r=[],ds=G.deploys;
+  for(const d of ds){
+    if(d.kind!=='post'||!d.owner||!d.owner.alive||d.owner===a||isAlly(d.owner,a))continue;
+    for(const q of ds)if(q.kind==='post'&&q.cid===d.cid&&(q.idx===d.idx+1||(d.closed&&d.idx===d.cnt-1&&q.idx===0))){r.push([d,q]);break}
+  }
+  return r;
+}
+function fenceBeamsC(a){const ai=a.ai;if(ai.fbT!==G.time){ai.fbT=G.time;ai.fbL=fenceBeams(a)}return ai.fbL}
+function fenceHitAt(a,x,y){
+  const bm=fenceBeamsC(a);
+  for(let i=0;i<bm.length;i++){const p=bm[i][0],q=bm[i][1];if(segDist(x,y,p.x,p.y,q.x,q.y)<a.r+12)return true}
+  return false;
+}
+// Shoot out a nearby hostile fence post (ranged weapons only)
+function fenceBrain(a){
+  if(a.weapon==='sword')return null;
+  const bm=fenceBeamsC(a);if(!bm.length)return null;
+  const maxD=Math.min(a.st.speed*a.st.life*.8,260),minD=a.weapon==='rocket'?130:0;
+  let best=null,bd=1e9;
+  for(const b of bm){const p=b[0],dd=Math.hypot(p.x-a.x,p.y-a.y);if(dd<bd&&dd<=maxD&&dd>=minD){const f=Math.atan2(p.y-a.y,p.x-a.x);if(rayCast(a.x,a.y,f,dd)>=dd-p.r-4){bd=dd;best=p}}}
+  if(!best)return null;
+  return{face:Math.atan2(best.y-a.y,best.x-a.x),fire:true};
 }
 function doorBreak(a,dt){
   const ai=a.ai;
@@ -2376,6 +2433,7 @@ function controlAI(a,dt){
     }
   }
   if(!tgt){const o=doorBreak(a,dt);if(o){gx=o.gx;gy=o.gy;useNav=o.nav;idle=false;ai.orb=null;ai.holdT=0;if(o.hold){face=o.face;fire=true;useNav=false}}}
+  if(!tgt){const o=fenceBrain(a);if(o){face=o.face;fire=true;useNav=false;idle=true;ai.orb=null;ai.holdT=0}}
   if(a.weapon==='smg'){const o=trapBrain(a,tgt,tgt?Math.sqrt(td):0);if(o){gx=o.gx;gy=o.gy;useNav=o.nav;idle=false;ai.holdT=0;ai.trapState=o.state}else ai.trapState=null}
   if(a.weapon==='rocket'){const o=rocketFlee(a,tgt);if(o){gx=o.gx;gy=o.gy;useNav=true;idle=false;ai.holdT=0;ai.orb=null;ai.trapState=o.state}}
   if(a.weapon!=='rocket'&&a.weapon!=='smg'){const o=retreatBrain(a,tgt);if(o){gx=o.gx;gy=o.gy;useNav=true;idle=false;ai.holdT=0;ai.orb=null;ai.trapState=o.state;if(o.nofire)fire=false}}
@@ -2408,7 +2466,7 @@ function controlAI(a,dt){
     if(dl>8){
       const want=Math.atan2(dy,dx);let bestS=-9,bestA=want;
       for(let i=0;i<16;i++){const ang=i*TAU/16,cx=Math.cos(ang),cy=Math.sin(ang);
-        let s=Math.cos(angDiff(want,ang));if(blocked(a.x+cx*34,a.y+cy*34,18))s-=3;if(blocked(a.x+cx*70,a.y+cy*70,18))s-=.8;
+        let s=Math.cos(angDiff(want,ang));if(blocked(a.x+cx*34,a.y+cy*34,18))s-=3;if(blocked(a.x+cx*70,a.y+cy*70,18))s-=.8;if(fenceHitAt(a,a.x+cx*34,a.y+cy*34))s-=3;if(fenceHitAt(a,a.x+cx*70,a.y+cy*70))s-=1.5;
         if(s>bestS){bestS=s;bestA=ang}}
       ai.sx=Math.cos(bestA);ai.sy=Math.sin(bestA);
     }else{ai.sx=0;ai.sy=0}
@@ -2528,6 +2586,7 @@ function startMatch(){
   const mc=setupMode({mode:G.gmode,n:G.gsize});
   for(let i=0;i<N_FIGHT;i++){const f=makeFighter(i,i===0?G.pick:WKEYS[Math.floor(Math.random()*WKEYS.length)]);if(mc.mode==='team')f.team=i<2?0:1;G.fighters.push(f)}
   G.P=G.fighters[0];G.dropNo=1;startDrop();
+  try{if(!localStorage.getItem('hordemarkers')){localStorage.setItem('hordemarkers','1');feedAdd('Green corners mark buildings, green dots mark doorways',true)}}catch(e){}
 }
 const SPEEDS=[1,2,4,8];
 function cycleSpeed(){G.speedIdx=(G.speedIdx+1)%SPEEDS.length}
@@ -2547,7 +2606,7 @@ function spawnOrb(inside,item){
 }
 function startDrop(){
   G.fighters=G.fighters.filter(f=>!f.zomb);G.hzT=0;G.hzN=0;G.zKills=0;
-  if(G.dropNo===1)G.drawN=0;G.sudden=!G.debug&&(G.drawN||0)>=2;G.draw=false;for(const f of G.fighters){f.deadT=0;f.dsh=undefined}
+  if(G.dropNo===1)G.drawN=0;G.sudden=!G.debug&&(G.drawN||0)>=2;G.draw=false;for(const f of G.fighters){f.deadT=0;f.dsh=undefined;f.revN=0}
   const fs=G.fighters,a0=Math.random()*TAU,order=shuffle([...Array(N_FIGHT).keys()]);
   fs.forEach((f,idx)=>{
     const slot=order[idx];let x=MID,y=MID;
@@ -2560,6 +2619,7 @@ function startDrop(){
   G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;boReset();G.pending=0;G.molo=0;G.afterPick=false;recDrop();G.pOut=!!G.debug;G.elimT=0;G.spectating=!!G.debug;G.spec=null;G.ff=false;G.winner=null;
   G.sc={x:MID+rnd(-800,800)*G.ms,y:MID+rnd(-800,800)*G.ms};G.st=storm(0);const ins=G.ms<.99,os=G.os;
   for(let i=0,n=Math.round(40*os);i<n;i++)spawnOrb(ins);
+  for(const f of G.fighters){if(f.zomb)continue;for(let b=0;b<3;b++){for(let k=0;k<20;k++){const a=Math.random()*TAU,r=rnd(90,220),x=f.x+Math.cos(a)*r,y=f.y+Math.sin(a)*r;if(x>80&&y>80&&x<WORLD-80&&y<WORLD-80&&!blocked(x,y,30)){G.orbs.push({x,y,t:Math.random()*TAU,item:'band'});break}}}}
   mapReset();padStep(0);
   G.orbT=1;G.cam={x:G.P.x,y:G.P.y};
   hordeInit();SFX.drop();
@@ -2679,10 +2739,11 @@ function drawZombie(z){
   for(const sd of[-1,1]){const reach=z.r*(1.15+.35*sw+bob*sd);ctx.beginPath();ctx.moveTo(z.r*.2,sd*z.r*.7);ctx.lineTo(reach+z.r*.35,sd*z.r*(.55-.15*sw));ctx.stroke();
     ctx.strokeStyle=body;ctx.lineWidth=3*big;ctx.beginPath();ctx.moveTo(z.r*.2,sd*z.r*.7);ctx.lineTo(reach+z.r*.35,sd*z.r*(.55-.15*sw));ctx.stroke();ctx.strokeStyle=dark;ctx.lineWidth=5*big}
   // torso and head
-  ctx.fillStyle=dark;ctx.beginPath();ctx.ellipse(-z.r*.1,0,z.r*.95,z.r*1.05,0,0,TAU);ctx.fill();
+  const bright=k==='hunter'||k==='sprinter'||k==='boss',rim=k==='hunter'?'#ff8aa0':k==='sprinter'?'#fff27a':k==='boss'?'#ff6f8a':'rgba(190,230,150,.55)';
+  ctx.fillStyle=dark;ctx.beginPath();ctx.ellipse(-z.r*.1,0,z.r*.95,z.r*1.05,0,0,TAU);ctx.fill();ctx.strokeStyle=rim;ctx.lineWidth=(bright?2.2:1.5)*Math.max(1,big);ctx.stroke();
   ctx.fillStyle=body;ctx.beginPath();ctx.ellipse(-z.r*.1,0,z.r*.8,z.r*.9,0,0,TAU);ctx.fill();
   ctx.fillStyle=k==='boss'?'#8a2a3c':'#8c1f2b';ctx.beginPath();ctx.ellipse(-z.r*.35,z.r*.25,z.r*.28,z.r*.2,.5,0,TAU);ctx.fill();
-  ctx.fillStyle=dark;ctx.beginPath();ctx.arc(z.r*.35,0,z.r*.55,0,TAU);ctx.fill();
+  ctx.fillStyle=dark;ctx.beginPath();ctx.arc(z.r*.35,0,z.r*.55,0,TAU);ctx.fill();ctx.strokeStyle=rim;ctx.lineWidth=(bright?2.2:1.5)*Math.max(1,big);ctx.stroke();
   ctx.fillStyle=body;ctx.beginPath();ctx.arc(z.r*.35,0,z.r*.46,0,TAU);ctx.fill();
   ctx.fillStyle=k==='hunter'?'#ff3030':k==='sprinter'?'#ff9a1c':'#ffe55a';ctx.beginPath();ctx.arc(z.r*.58,-z.r*.17,z.r*.1,0,TAU);ctx.arc(z.r*.58,z.r*.17,z.r*.1,0,TAU);ctx.fill();
   if(k==='boss'){ctx.strokeStyle='#ff4d6a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,z.r+4,0,TAU);ctx.stroke()}
@@ -2727,7 +2788,7 @@ function hordeStep(dt){
   chewStep(dt);
   G.hzT-=dt;
   if(G.hzT<=0){
-    G.hzT=.25;const Re=Math.min(st.r,1950),want=Math.min(HCAP,Math.round((G.hbase+Math.floor(G.time*G.hrate))*HORDE_TUNE.targetMul*hordeAliveMul()));
+    G.hzT=.25;const Re=Math.min(st.r,1950),want=Math.min(HCAP+teamCapBonus(),Math.round((G.hbase+Math.floor(G.time*G.hrate))*HORDE_TUNE.targetMul*hordeAliveMul()*teamPressureMul()));
     if(G.hzN<want)hordeEdge(st.cx,st.cy,Re,Math.min(2,want-G.hzN));
   }
   // sprinters: fragile but faster than any hero, they start coming once the first zone shrink is done
@@ -2915,9 +2976,14 @@ function debugResults(){
 function openElim(){
   if(G.mode!=='play')return;
   const P=G.P;if(!NET.m)G.mode='elim';
+  let who=P.elimBy;
+  if(!who){const sfx=' eliminated '+P.name,m=[...G.feed].reverse().find(e=>e.text.endsWith(sfx));if(m)who=m.text.slice(0,-sfx.length)}
+  const left=G.fighters.reduce((n,f)=>n+(f.alive&&!f.zomb?1:0),0);
   show(`<p class="eyebrow">Drop ${G.dropNo}</p><h2>Eliminated · #${P.place}</h2>
+    <p class="lede">${who?`Eliminated by <b>${who}</b>`:'You fell'} · <b>${left}</b> fighter${left===1?'':'s'} remain${left===1?'s':''}.</p>${standingsHTML(5)}
     <p class="lede">${P.dropKills} kill${P.dropKills===1?'':'s'} this drop. ${typeof NET!=='undefined'&&NET.live?'The other fighters keep fighting':'The bots keep fighting'}. Watch the rest, or skip ahead to the results.</p>
     <div class="row"><button class="go" data-act="spec">Spectate</button>${NET.m?'<button class="go ghost" data-act="menu">Leave match</button>':'<button class="go ghost" data-act="skip">Skip ahead</button>'}</div>`);
+  panel.classList.add('elim');
 }
 function pickSpec(dir){
   const al=G.fighters.filter(f=>f.alive&&!f.zomb);if(!al.length)return;
@@ -2946,7 +3012,7 @@ function openLevelPick(){
 
 // ---------- Overlay ----------
 const ov=$('#ov'),panel=$('#panel');
-function show(html){panel.innerHTML=html;ov.hidden=false;panel.scrollTop=0;sticks.move=sticks.aim=null;mouse.down=false;dashQueued=false;abQueued=false;G.molo=0}
+function show(html){panel.classList.remove('elim');panel.innerHTML=html;ov.hidden=false;panel.scrollTop=0;sticks.move=sticks.aim=null;mouse.down=false;dashQueued=false;abQueued=false;G.molo=0}
 function hide(){ov.hidden=true}
 function showHUD(on){const h=$('#hud');h.hidden=!on;if(!on)ZM.hidden=true;$('#bandBtn').hidden=!on;$('#kitBtn').hidden=!on;$('#abBtn').hidden=!on;$('#dashBtn').hidden=!on;if(on)hudBottom=h.getBoundingClientRect().bottom}
 function modeNote(){return G.gmode==='duel'?'1v1: a small arena, a light zombie horde, first to 3 round wins.':G.gmode==='team'?'2v2: you and a bot ally against two bots. Allies cannot hurt each other. Lethal damage downs you instead while a teammate lives: stand still beside a downed ally to revive them. First team to 3 round wins.':'Last one alive wins the drop. First to 3 drop wins takes the match.'}
@@ -2958,10 +3024,10 @@ function menu(){
   <div class="group"><span class="glabel">Bot skill</span><div class="seg">${Object.keys(DIFF).map(k=>`<button data-act="diff" data-v="${k}" aria-pressed="${G.diff===k}">${cap(k)}</button>`).join('')}</div></div>
   <div class="group"><span class="glabel">Mode</span><div class="seg">${Object.entries(MODES).map(([k,v])=>`<button data-act="gmode" data-v="${k}" aria-pressed="${G.gmode===k}">${v}</button>`).join('')}</div></div>
   <div class="group"><span class="glabel">Map</span><div class="seg" style="grid-template-columns:repeat(4,1fr)">${[['random','Random'],...Object.entries(MAPS).map(([k,v])=>[k,v.name])].map(([k,v])=>`<button data-act="gmap" data-v="${k}" aria-pressed="${G.gmap===k}">${v}</button>`).join('')}</div></div>
-  <div class="group" id="sizeGrp" style="${G.gmode==='br'?'':'display:none'}"><span class="glabel">Lobby size · <b id="sizeV">${G.gsize}</b> fighters (you + ${G.gsize-1} bots)</span><input class="nin" type="range" id="gsize" min="2" max="16" value="${G.gsize}" style="padding:6px"></div>
+  <div class="group" id="sizeGrp" style="${G.gmode==='br'?'':'display:none'}"><label class="glabel" for="gsize">Lobby size · <b id="sizeV">${G.gsize}</b> fighters (you + ${G.gsize-1} bots)</label><input class="nin" type="range" id="gsize" min="2" max="16" value="${G.gsize}" style="padding:6px"></div>
   <p class="lede" id="modeNote">${modeNote()}</p>
   <div class="group"><span class="glabel">Choose your character</span><div class="weps">${Object.entries(WEAPONS).map(([k,w])=>{const c=CHARS[k];return `<button class="wep" data-act="wep" data-v="${k}" aria-pressed="${G.pick===k}" style="border-left:4px solid ${CPAL[k].acc}"><span class="wrole" style="color:${CPAL[k].acc}">${c.role} · ${w.name}</span><span class="wname">${c.name}</span><span class="wab"><b>${c.ab}.</b> ${c.desc}</span><span class="wstat">${w.n>1?w.damage+'×'+w.n:w.damage} dmg · ${w.rate}/s · ${k==='sword'?'∞':w.clip} rounds · ${c.hpMax} HP · move ${Math.round(c.spd*100)}% · ${c.cd}s ${k==='smg'?'per mine':'ability'}</span></button>`}).join('')}</div></div>
-  <button class="go" data-act="start">Start match</button>
+  <div class="pfoot"><button class="go" data-act="start">Start match</button></div>
   <button class="go ghost" data-act="online">Play online · up to 16 players</button>
   <button class="go ghost" data-act="mute">Sound: ${SFX.on?'on':'off'}</button>
   <button class="go ghost" data-pf="settings-menu">Settings · Controls</button>
@@ -2979,6 +3045,8 @@ function menu(){
     <li>Blackout Pulse: now and then the lights fail. Every cone narrows, flares light a few zones, and firing lights you up for two seconds.</li>
     <li>In 2v2, lethal damage downs you while your partner lives. Stand still beside a downed ally to revive them; a downed ally can crawl, and stands up with 35% health. A foe standing still beside you finishes you.</li>
     <li>Bandages (+25 HP, 3s) and med kits (full heal, 8s) lie around the map. Walk over them to carry up to 5 bandages and 1 med kit. Tap the green buttons (keys 1 and 2) to use one. You move at half speed and can't fire while healing. Taking damage or dashing cancels it and you keep the item.</li>
+    <li>Door panels: the dot beside a doorway is green when the door is open, red when it is locked and grey when it is broken. Stand next to a panel and tap the LOCK DOOR button (or the interact key) to lock or unlock it. Locked doors slow foes and zombies down until they break through.</li>
+    <li>Map markers: green corner ticks show the corners of a building, and small green dots show doorways and narrow gaps between walls. They are not the same as the door-panel dot, which only shows whether a door is open, locked or broken.</li>
     <li>Armor plates (blue shields) give +50 armor, shown as a bar above your health. It soaks damage first and shaves 2 off every hit, so it shrugs off small arms fire. You can only wear one at a time and can't pick up another until it breaks.</li>
     <li>Every character has one gun and one ability, and its own cards for both. Purple cards upgrade your ability.</li>
     <li>Amber cards upgrade your gun. They only appear for the character you picked.</li>
@@ -3699,7 +3767,7 @@ function charSprite(k,rk,kick,flash,noGun,gr,hol){
     ctx.strokeStyle=rgba(P.acc,.8);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(m+8,0);ctx.lineTo(m+16,0);ctx.moveTo(m+6,-4);ctx.lineTo(m+12,-9);ctx.moveTo(m+6,4);ctx.lineTo(m+12,9);ctx.stroke()}
 }
 function drawDown(e){
-  const bl=clamp(e.downT/25,0,1);
+  const bl=clamp(e.downT/TEAM_TUNE.downT,0,1);
   ctx.save();ctx.translate(e.x,e.y);
   ctx.strokeStyle='rgba(255,77,109,.9)';ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,e.r+9,-Math.PI/2,-Math.PI/2+TAU*bl);ctx.stroke();
   if(e.revP>0){ctx.strokeStyle='#6be38a';ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,0,e.r+16,-Math.PI/2,-Math.PI/2+TAU*Math.min(1,e.revP));ctx.stroke()}
@@ -3901,7 +3969,7 @@ function render0(){
       {const [qx,qy]=S(L.p.x,L.p.y);ctx.strokeStyle=L.ok?'#7fe0ff':'#ff4d5e';ctx.fillStyle=rgba(L.ok?'#7fe0ff':'#ff4d5e',.25);ctx.lineWidth=3;ctx.beginPath();ctx.arc(qx,qy,12*zz,0,TAU);ctx.fill();ctx.stroke();
         if(L.last){const [lx,ly]=S(L.last.x,L.last.y);ctx.lineWidth=2;ctx.setLineDash([6,6]);ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(qx,qy);ctx.stroke();ctx.setLineDash([])}}}
     ctx.textAlign='center';
-    if(bo&&bo.s===1){ctx.fillStyle='#ffb347';ctx.font='800 24px Oxanium, sans-serif';ctx.fillText('BLACKOUT IN '+Math.ceil(bo.t),VW/2,VH*.2)}
+    if(bo&&bo.s===1){ctx.fillStyle='rgba(10,6,0,.72)';ctx.fillRect(VW/2-190,VH*.2-36,380,66);ctx.fillStyle='#ffc766';ctx.font='800 34px Oxanium, sans-serif';ctx.fillText('BLACKOUT IN '+Math.ceil(bo.t),VW/2,VH*.2);ctx.fillStyle='#fff3d6';ctx.font='700 17px Oxanium, sans-serif';ctx.fillText('cones narrow, shots light you up',VW/2,VH*.2+22)}
     else if(bo&&bo.s===2){ctx.fillStyle='rgba(255,179,71,.9)';ctx.font='800 15px Oxanium, sans-serif';ctx.fillText('BLACKOUT · '+Math.ceil(bo.t)+'s · narrow vision · shooting lights you up',VW/2,VH*.15)}
     if(P.alive&&P.scanWarn>0&&!G.debug){ctx.fillStyle=`rgba(255,159,90,${Math.min(1,P.scanWarn)})`;ctx.font='800 18px Oxanium, sans-serif';ctx.fillText('SCANNED',VW/2,VH*.26)}
     if(P.alive&&P.down&&!G.debug){
@@ -3937,17 +4005,31 @@ function render0(){
     if(G.dropNo===1&&!G.mouseMode&&!G.debug)ctx.fillText('LEFT THUMB MOVES · RIGHT THUMB AIMS AND FIRES',VW/2,VH*.46+56);
   }
 }
+function drawZoneArrow(st,P){
+  if(G.zmode||G.debug||!P.alive)return;
+  const dx=st.cx-P.x,dy=st.cy-P.y,d=Math.hypot(dx,dy),out=d-st.r;
+  if(out<=0||d<1)return;
+  const ux=dx/d,uy=dy/d,R=Math.min(VW,VH)*.36,ax=VW/2+ux*R,ay=VH/2+uy*R,a=.65+.3*Math.sin(performance.now()/180);
+  ctx.save();ctx.translate(ax,ay);ctx.rotate(Math.atan2(uy,ux));
+  ctx.fillStyle='rgba(235,60,50,'+a.toFixed(2)+')';ctx.strokeStyle='rgba(0,0,0,.6)';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-10,-12);ctx.lineTo(-4,0);ctx.lineTo(-10,12);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.restore();
+  ctx.save();ctx.font='700 12px Oxanium, sans-serif';ctx.textAlign='center';ctx.fillStyle='rgba(255,255,255,.9)';
+  ctx.fillText(Math.round(out)+' to safe',ax-ux*22,ay-uy*22+4);ctx.restore();
+}
 function drawMinimap(st,reveal){
   const s=Math.min(PLAT.pc?190:clamp(Math.min(VW,VH)*.26,104,170),VW*.24),x=VW-s-16,y=hudBottom+8,k=s/WORLD,P=G.P;
   ctx.fillStyle=rgba(COL.void,.75);ctx.fillRect(x,y,s,s);ctx.strokeStyle=COL.line;ctx.lineWidth=1;ctx.strokeRect(x+.5,y+.5,s-1,s-1);
   ctx.fillStyle=rgba(COL.ink,.2);for(const r of RECTS)if(r.x>=0)ctx.fillRect(x+r.x*k,y+r.y*k,Math.max(1,r.w*k),Math.max(1,r.h*k));
   ctx.save();ctx.beginPath();ctx.rect(x,y,s,s);ctx.clip();
+  ctx.fillStyle='rgba(220,40,40,.28)';ctx.beginPath();ctx.rect(x,y,s,s);ctx.arc(x+st.cx*k,y+st.cy*k,Math.max(0,st.r*k),0,TAU,true);ctx.fill('evenodd');
   ctx.strokeStyle=COL.storm;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x+st.cx*k,y+st.cy*k,st.r*k,0,TAU);ctx.stroke();
   if(st.next){ctx.strokeStyle=rgba(COL.ink,.6);ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(x+st.next.x*k,y+st.next.y*k,Math.max(1,st.next.r*k),0,TAU);ctx.stroke();ctx.setLineDash([])}
   ctx.restore();
   ctx.fillStyle=COL.foe;
-  for(const e of G.fighters){if((e===P&&!G.debug)||!e.alive||e.zomb)continue;if(reveal||e.markT>0||isAlly(P,e)||(P.alive&&canSee(P,e))){ctx.fillStyle=isAlly(P,e)?COL.you:COL.foe;ctx.beginPath();ctx.arc(x+e.x*k,y+e.y*k,2.5,0,TAU);ctx.fill()}}
+  for(const e of G.fighters){if(e.zomb&&e.alive){if(!(reveal||G.debug||(P.alive&&(Math.hypot(e.x-P.x,e.y-P.y)<650||canSee(P,e)))))continue;const zk=e.zk,big=zk==='boss'?4.5:zk==='brute'?3.8:1.8;ctx.fillStyle=(zk==='hunter'||zk==='sprinter')?'#ff9a2e':'#ff3b30';ctx.beginPath();ctx.arc(x+e.x*k,y+e.y*k,big,0,TAU);ctx.fill();continue}if((e===P&&!G.debug)||!e.alive)continue;if(reveal||e.markT>0||isAlly(P,e)||(P.alive&&canSee(P,e))){ctx.fillStyle=isAlly(P,e)?COL.you:COL.foe;ctx.beginPath();ctx.arc(x+e.x*k,y+e.y*k,2.5,0,TAU);ctx.fill()}}
   if(P.alive&&!G.debug){ctx.fillStyle=COL.you;ctx.beginPath();ctx.arc(x+P.x*k,y+P.y*k,3,0,TAU);ctx.fill()}
+  drawZoneArrow(st,P);
 }
 function drawAttract(){
   const t=performance.now()/1000,cx=VW/2,cy=VH/2,R=Math.max(VW,VH)*.42+Math.sin(t*.5)*14;
@@ -3973,7 +4055,8 @@ function updateHUD(){
   E.alive.textContent=aliveCount();E.drop.textContent=G.zmode?`Wave ${G.wave}`:`Drop ${G.dropNo}`;
   E.kills.textContent=`${P.dropKills} kill${P.dropKills===1?'':'s'} · ${P.zk||0} zombies`;E.wins.textContent=G.zmode?'Survive':`${P.wins} win${P.wins===1?'':'s'}`;
   const s=Math.max(0,Math.ceil(st.left));
-  E.storm.textContent=st.shrinking?'Horde advancing':st.next?`Horde surges in ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`:'Last stand';
+  const zd=Math.hypot(P.x-st.cx,P.y-st.cy)-st.r;
+  E.storm.textContent=st.shrinking?'Horde advancing · '+s+'s'+(G.zmode?'':(zd>0?' · '+Math.round(zd)+' to safe':' · inside')):st.next?`Horde surges in ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`:'Last stand';
   const sp=G.spectating;
   E.dash.hidden=!ov.hidden||(sp?G.mode!=='play':false);
   E.dash.textContent=sp?(G.debug?SPEEDS[G.speedIdx]+'×':(NET.m?'NEXT':(G.ff?'1×':'SKIP'))):'DASH';
@@ -4168,10 +4251,10 @@ function netLobby(){
   ${tm&&me?`<div class="group"><span class="glabel">Your team</span><div class="seg"><button data-act="n_team" data-v="0" aria-pressed="${me.team!==1}">Team A</button><button data-act="n_team" data-v="1" aria-pressed="${me.team===1}">Team B</button></div></div>`:''}
   ${host?`<div class="group"><span class="glabel">Mode</span><div class="seg">${Object.entries(MODES).map(([k,v])=>`<button data-act="n_mode" data-v="${k}" aria-pressed="${cfg.mode===k}">${v}</button>`).join('')}</div></div>
   <div class="group"><span class="glabel">Map</span><div class="seg" style="grid-template-columns:repeat(4,1fr)">${[['random','Random'],...Object.entries(MAPS).map(([k,v])=>[k,v.name])].map(([k,v])=>`<button data-act="n_map" data-v="${k}" aria-pressed="${(cfg.map||'random')===k}">${v}</button>`).join('')}</div></div>
-  ${cfg.mode==='br'?`<div class="group"><span class="glabel">Lobby size · <b id="nsizeV">${cfg.size}</b> fighters (empty slots are bots)</span><input class="nin" type="range" id="nsize" min="${Math.max(2,NET.players.length)}" max="16" value="${cfg.size}" style="padding:6px"></div>`:`<p class="lede">${cfg.mode==='duel'?'1v1: a small arena with a light zombie horde. First to 3 round wins.':'2v2: two teams of two, pick yours above. Bots fill empty team slots. Allies cannot hurt each other.'}</p>`}
+  ${cfg.mode==='br'?`<div class="group"><label class="glabel" for="nsize">Lobby size · <b id="nsizeV">${cfg.size}</b> fighters (empty slots are bots)</label><input class="nin" type="range" id="nsize" min="${Math.max(2,NET.players.length)}" max="16" value="${cfg.size}" style="padding:6px"></div>`:`<p class="lede">${cfg.mode==='duel'?'1v1: a small arena with a light zombie horde. First to 3 round wins.':'2v2: two teams of two, pick yours above. Bots fill empty team slots. Allies cannot hurt each other.'}</p>`}
   <div class="group"><span class="glabel">Bot skill</span><div class="seg">${Object.keys(DIFF).map(k=>`<button data-act="diff" data-v="${k}" aria-pressed="${G.diff===k}">${cap(k)}</button>`).join('')}</div></div>`:''}
   <details class="how"><summary>Change character</summary>${wepGrid()}</details>
-  ${host?'<button class="go" data-act="n_start">Start match</button>':''}
+  ${host?'<div class="pfoot"><button class="go" data-act="n_start">Start match</button></div>':''}
   <button class="go ghost" data-act="n_leave">Leave room</button>`);
 }
 function netAct2(act,v){
@@ -4256,7 +4339,7 @@ function controlRemote(f,dt){
     else if(a[0]==='h'){const k=a[1]===1?'band':'kit';if(f.healT>0){f.healT=0;f.healKind=null}else startHeal(f,k)}
     else if(a[0]==='a'){if(f.weapon!=='revolver'){if(f.weapon==='crossbow'&&a.length>2)f.tgtPt={x:+a[1]||f.x,y:+a[2]||f.y};useAbility(f);f.tgtPt=null}}
     else if(a[0]==='z')toggleZoom(f);
-    else if(a[0]==='u')usePanel(f);
+    else if(a[0]==='u')usePanel(f,40);
     else if(a[0]==='m'&&f.weapon==='revolver'){
       const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,Math.min(d,rayCast(f.x,f.y,ang,d+30)-10));
       f.facing=ang;f.throwTarget={x:f.x+Math.cos(ang)*w,y:f.y+Math.sin(ang)*w};useAbility(f);f.throwTarget=null}
@@ -4337,7 +4420,7 @@ function netSnapFor(c){
       if(dx*dx+dy*dy<ZR2)Z.push(z.id*8+Math.max(0,ZKS.indexOf(z.zk)),Math.round(z.x),Math.round(z.y),Math.round(z.facing*10),Math.max(1,Math.round(z.hp/z.zhp*100))+101*Math.min(1,Math.round(z.hitFlash*10))+202*Math.min(3,Math.round(z.swingT*10)))}}
   const B=[];for(const b of G.bullets){const dx=b.x-cx,dy=b.y-cy;if(dx*dx+dy*dy<1000*1000)B.push([b.owner.id,Math.round(b.x),Math.round(b.y),Math.round(b.vx),Math.round(b.vy),Math.round(b.r*10),b.expl?1:0])}
   let O;if(c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
-  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
+  let M;if(c.n%4===3||c.n<3||c.mapv!==MAPV)M=(c.mapv=MAPV,DYN).map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
   const D=[];for(const d of G.deploys){const dx=d.x-cx,dy=d.y-cy;if(dx*dx+dy*dy>1100*1100)continue;
     const o={};for(const k in d){const v=d[k];if(k==='owner')o.oid=v.id;else if(typeof v==='number')o[k]=q2(v);else if(typeof v==='string'||typeof v==='boolean')o[k]=v}D.push(o)}
   const E=[];const from=Math.max(0,c.evi-NET.evBase);
