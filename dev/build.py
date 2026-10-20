@@ -1,5 +1,10 @@
-import re,sys
-src=open('/home/claude/storm-duel-horde.html').read()
+import re,sys,os
+ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE=os.environ.get('BASE',os.path.join(ROOT,'dev','base.html'))
+OUT=os.environ.get('OUT',os.path.join(ROOT,'build','index.html'))
+if not os.path.exists(BASE):
+    sys.exit('build.py: base file not found: '+BASE+'\nCommit the pre-net base page as dev/base.html or set BASE=<path>. Output goes to build/index.html (or OUT=<path>); it never overwrites public/index.html by default.')
+src=open(BASE).read()
 def rep(old,new,cnt=1):
     global src
     n=src.count(old)
@@ -36,17 +41,19 @@ css=""".nin{width:100%;box-sizing:border-box;background:var(--void);color:var(--
 #netInfo{position:fixed;top:4px;left:50%;transform:translateX(-50%);font:600 11px var(--mono);color:var(--muted);z-index:9;pointer-events:none;letter-spacing:.06em;text-shadow:0 1px 2px #000}
 </style>"""
 i=src.index("</style>");src=src[:i]+css+src[i+8:]
-net=open('src/net.js').read()
+net=open(os.path.join(ROOT,'src','net.js')).read()
 mark="pfInit();resize();menu();requestAnimationFrame(frame);"
 rep(mark,net+"\nif(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,rejoin:netRejoin,resync:netResync,humans:netHumans,NET,G};}else{"+mark.replace('requestAnimationFrame(frame);','requestAnimationFrame(frame);netResume();')+"}")
 rep("<title>","<title>Online · ") if False else None
 import os
 if os.environ.get('TEST'):
     src=src.replace('window.__G=G;','window.__G=G;window.__T={damage,eliminate,netSnapFor,tryDash,startHeal};')
-    open('/tmp/claude-0/t/test.html','w').write(src)
+    os.makedirs(os.path.dirname(OUT),exist_ok=True)
+    open(os.environ.get('TEST_OUT',os.path.join(os.path.dirname(OUT),'test.html')),'w').write(src)
 else:
     src=src.replace('window.__G=G;','')
     HEAD='<!doctype html>\n<html lang="en"><head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">\n<meta name="mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n<meta name="theme-color" content="#020403">\n'
     src=HEAD+src
-    open('/home/claude/mp/public/index.html','w').write(src)
+    os.makedirs(os.path.dirname(OUT),exist_ok=True)
+    open(OUT,'w').write(src)
 print('built',len(src))

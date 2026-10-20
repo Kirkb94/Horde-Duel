@@ -12,4 +12,13 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Syntax check
+        run: |
+          node --check server.js
+          node --check sim.js
+          for f in test/*.js; do node --check "$f"; done
+          python3 -m py_compile dev/build.py
+      - name: Warn about stale mp/ copy
+        run: |
+          if [ -d mp ]; then echo "::warning::mp/ is a stale duplicate of the root server and client. Delete it."; fi
       - run: npm test
