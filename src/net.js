@@ -185,6 +185,7 @@ function controlRemote(f,dt){
     else if(a[0]==='h'){const k=a[1]===1?'band':'kit';if(f.healT>0){f.healT=0;f.healKind=null}else startHeal(f,k)}
     else if(a[0]==='a'){if(f.weapon!=='revolver'){if(f.weapon==='crossbow'&&a.length>2)f.tgtPt={x:+a[1]||f.x,y:+a[2]||f.y};useAbility(f);f.tgtPt=null}}
     else if(a[0]==='z')toggleZoom(f);
+    else if(a[0]==='u')usePanel(f);
     else if(a[0]==='m'&&f.weapon==='revolver'){
       const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,Math.min(d,rayCast(f.x,f.y,ang,d+30)-10));
       f.facing=ang;f.throwTarget={x:f.x+Math.cos(ang)*w,y:f.y+Math.sin(ang)*w};useAbility(f);f.throwTarget=null}
@@ -265,7 +266,7 @@ function netSnapFor(c){
       if(dx*dx+dy*dy<ZR2)Z.push(z.id*8+Math.max(0,ZKS.indexOf(z.zk)),Math.round(z.x),Math.round(z.y),Math.round(z.facing*10),Math.max(1,Math.round(z.hp/z.zhp*100))+101*Math.min(1,Math.round(z.hitFlash*10))+202*Math.min(3,Math.round(z.swingT*10)))}}
   const B=[];for(const b of G.bullets){const dx=b.x-cx,dy=b.y-cy;if(dx*dx+dy*dy<1000*1000)B.push([b.owner.id,Math.round(b.x),Math.round(b.y),Math.round(b.vx),Math.round(b.vy),Math.round(b.r*10),b.expl?1:0])}
   let O;if(c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
-  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?0:Math.max(1,Math.ceil(r.hp)));
+  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
   const D=[];for(const d of G.deploys){const dx=d.x-cx,dy=d.y-cy;if(dx*dx+dy*dy>1100*1100)continue;
     const o={};for(const k in d){const v=d[k];if(k==='owner')o.oid=v.id;else if(typeof v==='number')o[k]=q2(v);else if(typeof v==='string'||typeof v==='boolean')o[k]=v}D.push(o)}
   const E=[];const from=Math.max(0,c.evi-NET.evBase);
@@ -324,7 +325,11 @@ function netApplySnap(d){
       if((k==='dashSp'||k==='dashDir')&&!(dsp>800))continue;
       P[k]=v}
     P.tx=t[1];P.ty=t[2];G.pending=P.pend||0;
-    if(!P.alive||Math.hypot(P.tx-P.x,P.ty-P.y)>140){P.x=P.tx;P.y=P.ty}else{P.x+=(P.tx-P.x)*.18;P.y+=(P.ty-P.y)*.18}
+    {const ex=P.tx-P.x,ey=P.ty-P.y,er=Math.hypot(ex,ey),mv=Math.hypot(P.mv.x,P.mv.y)>.1||P.dashT>0;
+      // host position trails the predicted one by ~RTT while moving: tolerate that lag, only correct real divergence
+      const tol=mv?Math.max(70,(NET.rtt||120)*.42):10;
+      if(!P.alive||er>Math.max(260,tol*3)){P.x=P.tx;P.y=P.ty}
+      else if(er>tol){const k=.1*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
     if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt()}
   }
   // others
@@ -359,8 +364,8 @@ function netApplySnap(d){
 }
 function netMapApply(M){
   for(let i=0;i<DYN.length&&i<M.length;i++){const r=DYN[i],v=M[i];
-    if(v===0){if(r.x>=0){dynPark(r);if(r.door){r.on=false;r.broken=true}else r.gone=true}}
-    else{if(r.x<0){r.x=r.ox;r.y=r.oy}if(r.door)r.on=true;r.hp=v}}
+    if(v<=0){if(r.x>=0)dynPark(r);if(r.door){r.on=false;r.broken=v<0}else r.gone=true}
+    else{if(r.x<0){r.x=r.ox;r.y=r.oy}if(r.door){r.on=true;r.broken=false}r.hp=v}}
 }
 function netMkZ(id,kc){
   const k=ZKS[kc]||'walker',z=makeFighter(id,'pistol');
@@ -446,8 +451,9 @@ function controlNet(dt){
     if(abQueued){abQueued=false;
       if(p.weapon==='revolver'){if(G.molo>0)G.molo=0;else if((p.abCD<=0||p.abCh>0)&&p.dashT<=0)G.molo=5}
       else NET.acts.push(p.weapon==='crossbow'&&p.tgtPt?['a',q2(p.tgtPt.x),q2(p.tgtPt.y)]:['a'])}
+    if(useQueued){useQueued=false;if(nearPanel(p))NET.acts.push(['u'])}
     if(keys.has('KeyR')&&performance.now()-NET.keyR>400){NET.keyR=performance.now();NET.acts.push(['r'])}
-  }else{dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false}
+  }else{dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false;useQueued=false}
   p.mv={x:mx,y:my};p.wantFire=fire&&!p.down;
 }
 function netSendInput(){

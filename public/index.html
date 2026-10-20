@@ -72,6 +72,11 @@ button:focus-visible{outline:2px solid var(--you);outline-offset:2px}
 #abBtn.rdy{box-shadow:0 0 0 3px rgba(138,99,255,.25)}
 #zmBtn{position:fixed;right:calc(max(16px,env(safe-area-inset-right,0px)) + 170px);bottom:calc(env(safe-area-inset-bottom,0px) + min(42vh,230px));width:62px;height:62px;border-radius:50%;border:2px solid #b7a0ff;background:rgba(138,99,255,.14);font-weight:800;font-size:10px;letter-spacing:.08em;color:#c9b8ff;touch-action:none}
 #zmBtn[hidden]{display:none!important}
+#useBtn{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 96px);z-index:20;padding:12px 22px;border-radius:12px;border:2px solid #3fe07a;background:rgba(10,30,18,.82);color:#9af0b3;font:800 13px var(--display);letter-spacing:.12em;touch-action:none;cursor:pointer;animation:needpulse 1.2s ease-in-out infinite}
+#useBtn[data-t=UNLOCK]{border-color:#e8573f;color:#ffb3a6;background:rgba(40,12,8,.82)}
+#useBtn[hidden]{display:none!important}
+html[data-plat=pc] #useBtn::before{content:attr(data-key);margin-right:10px;padding:2px 7px;font:700 11px var(--mono);color:var(--ink);background:#0b100f;border:1px solid #2a3633;border-bottom-width:2px;border-radius:4px}
+html[data-plat=phone] #useBtn{bottom:calc(var(--sb) + 190px*var(--k,1));padding:calc(14px*var(--k,1)) calc(24px*var(--k,1));font-size:calc(14px*var(--hs,1))}
 #zmBtn.on{background:rgba(138,99,255,.5);box-shadow:0 0 0 3px rgba(138,99,255,.3)}
 #zmBtn .cnt{display:block;font-size:15px;letter-spacing:0;line-height:1;margin-top:2px}
 html[data-plat=pc] #zmBtn{top:auto;right:auto;left:calc(50% + 182px);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);width:84px;height:62px;border-radius:9px;font-size:11px;cursor:pointer}
@@ -242,6 +247,7 @@ html[data-plat=pc] h1{font-size:64px}
 <button id="dashBtn" hidden aria-label="Dash">DASH</button>
 <button id="abBtn" hidden aria-label="Ability">ABILITY</button>
 <button id="zmBtn" hidden aria-label="Sniper zoom">ZOOM</button>
+<button id="useBtn" hidden aria-label="Door panel">LOCK DOOR</button>
 <button id="bandBtn" class="hb" hidden aria-label="Bandage">BANDAGE</button>
 <button id="kitBtn" class="hb" hidden aria-label="Med kit">MED KIT</button>
 
@@ -428,10 +434,10 @@ function genMap(id){
       const sp=spec.find(d=>d.s===k),has=!!sp,L=k<2?w:h-2*T;let lo=70,hi=L-DW-70,d0=0;
       if(has){if(hi<lo)d0=(L-DW)/2;else d0=sp.t!=null?lo+(hi-lo)*sp.t:R(lo,hi)}
       if(k<2){const y=k===0?y0:y1-T;
-        if(has){seg(x0,y,d0,T);seg(x0+d0+DW,y,w-d0-DW,T);const d=mk(k,x0+d0,y,DW,T),py=k===0?y0+T:y1-T,left=d0>=w-d0-DW;panel(d,left?x0+d0-38:x0+d0+DW+38,py,0,k===0?1:-1)}
+        if(has){seg(x0,y,d0,T);seg(x0+d0+DW,y,w-d0-DW,T);const d=mk(k,x0+d0,y,DW,T),py=k===0?y0+T:y1-T,pyo=k===0?y0:y1,left=d0>=w-d0-DW,pxx=left?x0+d0-38:x0+d0+DW+38;panel(d,pxx,py,0,k===0?1:-1);panel(d,pxx,pyo,0,k===0?-1:1)}
         else seg(x0,y,w,T)}
       else{const x=k===2?x0:x1-T,yb=y0+T;
-        if(has){seg(x,yb,T,d0);seg(x,yb+d0+DW,T,L-d0-DW);const d=mk(k,x,yb+d0,T,DW),px=k===2?x0+T:x1-T,up=d0>=L-d0-DW;panel(d,px,up?yb+d0-38:yb+d0+DW+38,k===2?1:-1,0)}
+        if(has){seg(x,yb,T,d0);seg(x,yb+d0+DW,T,L-d0-DW);const d=mk(k,x,yb+d0,T,DW),px=k===2?x0+T:x1-T,pxo=k===2?x0:x1,up=d0>=L-d0-DW,pyy=up?yb+d0-38:yb+d0+DW+38;panel(d,px,pyy,k===2?1:-1,0);panel(d,pxo,pyy,k===2?-1:1,0)}
         else seg(x,yb,T,L)}
     }
     const nc=o.nc!=null?o.nc:(w*h>160000?4+Math.floor(rr()*2):2+Math.floor(rr()*2));
@@ -723,9 +729,34 @@ function breakDyn(r){
 function hitDyn(r,dmg){if(!r.dyn||r.x<0||!(dmg>0))return;r.hp-=dmg;r.flash=.14;if(r.hp<=0)breakDyn(r)}
 function lockDoor(d){
   if(d.on||d.broken)return false;
-  for(const f of G.fighters)if(f.alive&&f.x>d.ox-f.r-26&&f.x<d.ox+d.w+f.r+26&&f.y>d.oy-f.r-26&&f.y<d.oy+d.h+f.r+26)return false;
+  for(const f of G.fighters)if(f.alive&&f.x>d.ox-f.r-3&&f.x<d.ox+d.w+f.r+3&&f.y>d.oy-f.r-3&&f.y<d.oy+d.h+f.r+3)return false;
   d.x=d.ox;d.y=d.oy;d.on=true;d.hp=d.mhp;MAPV++;navLocal(d);
   if(near(d.cx,d.cy))burst(d.cx,d.cy,'#e8573f',12,200);noise(d.cx,d.cy,650);return true;
+}
+function unlockDoor(d){
+  if(!d.on||d.broken)return false;
+  dynPark(d);d.on=false;d.hp=0;MAPV++;navLocal(d);if(near(d.cx,d.cy))burst(d.cx,d.cy,'#3fe07a',10,160);noise(d.cx,d.cy,420);return true;
+}
+function nearPanel(f){
+  let best=null,bd=76;
+  for(const p of PANELS){if(p.door.broken)continue;const d=Math.hypot(f.x-p.x,f.y-p.y);if(d<bd&&(f.x-p.x)*p.nx+(f.y-p.y)*p.ny>-6){bd=d;best=p}}
+  return best;
+}
+function usePanel(f){
+  const p=nearPanel(f);if(!p||(f.useCD||0)>G.time)return false;f.useCD=G.time+.45;
+  const d=p.door;let ok=false;
+  if(d.on)ok=unlockDoor(d);else ok=lockDoor(d);
+  p.flash=ok?.5:0;if(!ok&&near(p.x,p.y))burst(p.x,p.y,'#e8573f',5,120);
+  return ok;
+}
+function updateUse(){
+  const b=document.getElementById('useBtn');if(!b)return;
+  const P=G.P,on=!!P&&P.alive&&!P.down&&G.mode==='play'&&ov.hidden&&!G.spectating&&!G.debug;
+  const pn=on?nearPanel(P):null;
+  if(!pn){if(!b.hidden)b.hidden=true;return}
+  const t=pn.door.on?'UNLOCK':'LOCK';if(b.dataset.t!==t){b.dataset.t=t;b.firstChild.nodeValue=t+' DOOR'}
+  const k=keyName(BIND.interact[0]);if(b.dataset.key!==k)b.dataset.key=k;
+  if(b.hidden)b.hidden=false;
 }
 function mapReset(){
   for(const r of DYN){r.flash=0;if(r.door){dynPark(r);r.on=false;r.broken=false;r.hp=0}else{r.x=r.ox;r.y=r.oy;r.hp=r.mhp;r.gone=false}}
@@ -1132,12 +1163,12 @@ function storm(t){
 }
 
 // ---------- Input ----------
-let STICK_R=64;const sticks={move:null,aim:null};const keys=new Set();const mouse={x:0,y:0,down:false};let dashQueued=false,abQueued=false,healQueued=null,zoomQueued=false;
+let STICK_R=64;const sticks={move:null,aim:null};const keys=new Set();const mouse={x:0,y:0,down:false};let useQueued=false,dashQueued=false,abQueued=false,healQueued=null,zoomQueued=false;
 // ---------- Platform: PC / phone detection, key bindings, settings ----------
 const PLAT={mode:'auto',auto:false,pc:false,zoomK:1,look:.35,hints:true,q:'auto',vol:1};
-const BIND_DEF={up:['KeyW'],down:['KeyS'],left:['KeyA'],right:['KeyD'],dash:['Space'],ability:['KeyQ'],zoom:['KeyZ'],band:['Digit1'],kit:['Digit2'],pause:['Escape'],hints:['KeyH']};
+const BIND_DEF={up:['KeyW'],down:['KeyS'],left:['KeyA'],right:['KeyD'],dash:['Space'],ability:['KeyQ'],zoom:['KeyZ'],band:['Digit1'],kit:['Digit2'],pause:['Escape'],hints:['KeyH'],interact:['KeyF']};
 const BIND_ALT={up:['ArrowUp'],down:['ArrowDown'],left:['ArrowLeft'],right:['ArrowRight'],dash:['ShiftLeft','ShiftRight'],ability:['KeyE'],pause:['KeyP']};
-const BIND_NAME={up:'Move up',down:'Move down',left:'Move left',right:'Move right',dash:'Dash',ability:'Ability',zoom:'Sniper zoom',band:'Bandage',kit:'Med kit',pause:'Pause',hints:'Key hints'};
+const BIND_NAME={up:'Move up',down:'Move down',left:'Move left',right:'Move right',dash:'Dash',ability:'Ability',zoom:'Sniper zoom',band:'Bandage',kit:'Med kit',pause:'Pause',hints:'Key hints',interact:'Interact (door panel)'};
 let BIND={},ALT={};
 const PF={rebind:null,open:false,from:'menu'};
 function pfResetBinds(){BIND={};ALT={};for(const k in BIND_DEF)BIND[k]=BIND_DEF[k].slice();for(const k in BIND_ALT)ALT[k]=BIND_ALT[k].slice()}
@@ -1210,6 +1241,7 @@ function kbAction(e){
   if(has('dash')){dashQueued=true;e.preventDefault()}
   if(has('ability'))abQueued=true;
   if(has('zoom')&&!e.repeat)zoomQueued=true;
+  if(has('interact')&&!e.repeat&&!G.debug)useQueued=true;
   if(has('pause'))togglePause();
   if(has('hints')&&!e.repeat){PLAT.hints=!PLAT.hints;pfSave()}
   return false;
@@ -1315,6 +1347,7 @@ $('#dashBtn').addEventListener('pointerdown',e=>{e.preventDefault();if(G.debug)c
 const healBtn=(id,k)=>$(id).addEventListener('pointerdown',e=>{e.preventDefault();if(!G.debug&&!G.spectating)healQueued=(G.P.healT>0&&G.P.healKind!==k)?null:k});
 healBtn('#bandBtn','band');healBtn('#kitBtn','kit');
 $('#pauseBtn').addEventListener('click',togglePause);
+$('#useBtn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();useQueued=true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&!NET.m&&(G.mode==='play'||G.mode==='count'))togglePause();if(document.hidden)clearSticks()});
 let wakeLock=null;
 async function keepAwake(){try{if(!('wakeLock' in navigator)||wakeLock||document.hidden||PLAT.pc)return;wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null})}catch(_){wakeLock=null}}
@@ -2163,8 +2196,9 @@ function controlPlayer(dt){
   else if(G.mouseMode){const z=zoom();const wx=(mouse.x-innerWidth/2)/z+G.cam.x,wy=(mouse.y-innerHeight/2)/z+G.cam.y;p.facing=Math.atan2(wy-p.y,wx-p.x);p.tgtPt={x:wx,y:wy};fire=mouse.down}
   else if(mm>0.15)p.facing=turnToward(p.facing,Math.atan2(my,mx),12*dt);
   p.wantFire=fire&&!p.down;
-  if(p.down){dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false;return}
+  if(p.down){dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false;useQueued=false;return}
   if(zoomQueued){zoomQueued=false;toggleZoom(p)}
+  if(useQueued){useQueued=false;usePanel(p)}
   if(dashQueued){dashQueued=false;tryDash(p,mx,my)}
   if(G.molo>0){G.molo-=dt;if(G.molo<=0)G.molo=0}
   if(healQueued){const k=healQueued;healQueued=null;if(p.healT>0){p.healT=0;p.healKind=null}else startHeal(p,k)}
@@ -2925,7 +2959,7 @@ panel.addEventListener('click',e=>{
     case 'mute':SFX.init();SFX.toggle();b.textContent='Sound: '+(SFX.on?'on':'off');break;
     case 'zombies':startZombies();break;
     case 'online':netMenu();break;
-    case 'n_quick':case 'n_create':case 'n_join':case 'n_start':case 'n_leave':case 'n_lobby':case 'n_rematch':case 'n_mode':case 'n_team':netAct2(b.dataset.act,v);break;
+    case 'n_quick':case 'n_create':case 'n_join':case 'n_start':case 'n_leave':case 'n_lobby':case 'n_rematch':case 'n_mode':case 'n_map':case 'n_team':netAct2(b.dataset.act,v);break;
     case 'dbgnext':for(const f of G.fighters)aiPick(f);G.dropNo++;startDrop();break;
     case 'resume':togglePause();break;
     case 'spec':if(!NET.m)G.mode='play';hide();break;
@@ -3899,7 +3933,7 @@ function frame(now){
     if(REEL.on){if(G.mode!=='over')reelClose(false);else{reelUpdate(dt);drawReel();requestAnimationFrame(frame);return}}
     const steps=G.debug?((G.mode==='play'||G.mode==='ending')?SPEEDS[G.speedIdx]:1):((G.ff&&G.spectating&&G.mode==='play')?8:1);
     const st2=(NET.m==='host'&&G.mode==='play'&&netNoHumans())?4:(NET.m?1:steps);for(let i=0;i<st2;i++)update(dt);
-    render();updateHUD();
+    render();updateHUD();updateUse();
   }catch(err){console.error(err)}
   requestAnimationFrame(frame);
 }
@@ -4091,6 +4125,7 @@ function controlRemote(f,dt){
     else if(a[0]==='h'){const k=a[1]===1?'band':'kit';if(f.healT>0){f.healT=0;f.healKind=null}else startHeal(f,k)}
     else if(a[0]==='a'){if(f.weapon!=='revolver'){if(f.weapon==='crossbow'&&a.length>2)f.tgtPt={x:+a[1]||f.x,y:+a[2]||f.y};useAbility(f);f.tgtPt=null}}
     else if(a[0]==='z')toggleZoom(f);
+    else if(a[0]==='u')usePanel(f);
     else if(a[0]==='m'&&f.weapon==='revolver'){
       const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,Math.min(d,rayCast(f.x,f.y,ang,d+30)-10));
       f.facing=ang;f.throwTarget={x:f.x+Math.cos(ang)*w,y:f.y+Math.sin(ang)*w};useAbility(f);f.throwTarget=null}
@@ -4171,7 +4206,7 @@ function netSnapFor(c){
       if(dx*dx+dy*dy<ZR2)Z.push(z.id*8+Math.max(0,ZKS.indexOf(z.zk)),Math.round(z.x),Math.round(z.y),Math.round(z.facing*10),Math.max(1,Math.round(z.hp/z.zhp*100))+101*Math.min(1,Math.round(z.hitFlash*10))+202*Math.min(3,Math.round(z.swingT*10)))}}
   const B=[];for(const b of G.bullets){const dx=b.x-cx,dy=b.y-cy;if(dx*dx+dy*dy<1000*1000)B.push([b.owner.id,Math.round(b.x),Math.round(b.y),Math.round(b.vx),Math.round(b.vy),Math.round(b.r*10),b.expl?1:0])}
   let O;if(c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
-  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?0:Math.max(1,Math.ceil(r.hp)));
+  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
   const D=[];for(const d of G.deploys){const dx=d.x-cx,dy=d.y-cy;if(dx*dx+dy*dy>1100*1100)continue;
     const o={};for(const k in d){const v=d[k];if(k==='owner')o.oid=v.id;else if(typeof v==='number')o[k]=q2(v);else if(typeof v==='string'||typeof v==='boolean')o[k]=v}D.push(o)}
   const E=[];const from=Math.max(0,c.evi-NET.evBase);
@@ -4230,7 +4265,11 @@ function netApplySnap(d){
       if((k==='dashSp'||k==='dashDir')&&!(dsp>800))continue;
       P[k]=v}
     P.tx=t[1];P.ty=t[2];G.pending=P.pend||0;
-    if(!P.alive||Math.hypot(P.tx-P.x,P.ty-P.y)>140){P.x=P.tx;P.y=P.ty}else{P.x+=(P.tx-P.x)*.18;P.y+=(P.ty-P.y)*.18}
+    {const ex=P.tx-P.x,ey=P.ty-P.y,er=Math.hypot(ex,ey),mv=Math.hypot(P.mv.x,P.mv.y)>.1||P.dashT>0;
+      // host position trails the predicted one by ~RTT while moving: tolerate that lag, only correct real divergence
+      const tol=mv?Math.max(70,(NET.rtt||120)*.42):10;
+      if(!P.alive||er>Math.max(260,tol*3)){P.x=P.tx;P.y=P.ty}
+      else if(er>tol){const k=.1*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
     if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt()}
   }
   // others
@@ -4265,8 +4304,8 @@ function netApplySnap(d){
 }
 function netMapApply(M){
   for(let i=0;i<DYN.length&&i<M.length;i++){const r=DYN[i],v=M[i];
-    if(v===0){if(r.x>=0){dynPark(r);if(r.door){r.on=false;r.broken=true}else r.gone=true}}
-    else{if(r.x<0){r.x=r.ox;r.y=r.oy}if(r.door)r.on=true;r.hp=v}}
+    if(v<=0){if(r.x>=0)dynPark(r);if(r.door){r.on=false;r.broken=v<0}else r.gone=true}
+    else{if(r.x<0){r.x=r.ox;r.y=r.oy}if(r.door){r.on=true;r.broken=false}r.hp=v}}
 }
 function netMkZ(id,kc){
   const k=ZKS[kc]||'walker',z=makeFighter(id,'pistol');
@@ -4352,8 +4391,9 @@ function controlNet(dt){
     if(abQueued){abQueued=false;
       if(p.weapon==='revolver'){if(G.molo>0)G.molo=0;else if((p.abCD<=0||p.abCh>0)&&p.dashT<=0)G.molo=5}
       else NET.acts.push(p.weapon==='crossbow'&&p.tgtPt?['a',q2(p.tgtPt.x),q2(p.tgtPt.y)]:['a'])}
+    if(useQueued){useQueued=false;if(nearPanel(p))NET.acts.push(['u'])}
     if(keys.has('KeyR')&&performance.now()-NET.keyR>400){NET.keyR=performance.now();NET.acts.push(['r'])}
-  }else{dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false}
+  }else{dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false;useQueued=false}
   p.mv={x:mx,y:my};p.wantFire=fire&&!p.down;
 }
 function netSendInput(){
