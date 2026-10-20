@@ -233,6 +233,6 @@ setInterval(() => {
   for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch (e) {} }
   const now = Date.now();                              // sweep empty / abandoned lobbies
   for (const [c, r] of rooms) if (!r.players.size || (!r.started && now - r.created > 6 * 3600e3)) { stopSim(r); rooms.delete(c); }
-}, 25000);
+}, 10000);
 
 server.listen(PORT, () => console.log('Horde Duel server listening on :' + PORT + ' mode=' + MODE));
