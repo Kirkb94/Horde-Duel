@@ -12,7 +12,10 @@ const { loadPage, createSim } = require('./sim');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 16;
-const HOLD_MS = 30000;   // how long a disconnected player's slot is held for rejoin (auth mode)
+const envMs = (k, d) => { const v = +process.env[k]; return v > 0 ? v : d; };   // timer overrides (used by tests); defaults are production values
+const HOLD_MS = envMs('HOLD_MS', 30000);   // how long a disconnected player's slot is held for rejoin (auth mode)
+const SWEEP_MS = envMs('SWEEP_MS', 10000);   // sweeper interval
+const ROOM_MAX_AGE_MS = envMs('ROOM_MAX_AGE_MS', 6 * 3600e3);   // unstarted lobbies older than this are removed
 const newToken = () => crypto.randomBytes(16).toString('hex');
 const MAX_REJOIN_FAILS = 5;   // failed rejoin attempts allowed per socket before it is closed
 const tokEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
@@ -430,14 +433,15 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => {});
 });
 
-const sweeper = setInterval(() => {
+function sweep() {
   for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch (e) {} }
   const now = Date.now();                              // sweep empty / abandoned lobbies
   for (const [ip, arr] of ipRooms) { const keep = arr.filter(t => now - t < 60000); if (keep.length) ipRooms.set(ip, keep); else ipRooms.delete(ip); }
-  for (const [c, r] of rooms) if ((!r.players.size && !(r.held && r.held.size)) || (!r.started && now - r.created > 6 * 3600e3)) { clearHolds(r); stopSim(r); rooms.delete(c); }
-}, 10000);
+  for (const [c, r] of rooms) if ((!r.players.size && !(r.held && r.held.size)) || (!r.started && now - r.created > ROOM_MAX_AGE_MS)) { clearHolds(r); stopSim(r); rooms.delete(c); }
+}
+const sweeper = setInterval(sweep, SWEEP_MS);
 
-server.listen(PORT, () => console.log('Horde Duel server listening on :' + PORT + ' mode=' + MODE));
+server.listen(PORT, () => console.log('Horde Duel server listening on :' + server.address().port + ' mode=' + MODE));
 
 // Graceful shutdown (Render sends SIGTERM on every deploy/restart)
 let shuttingDown = false;

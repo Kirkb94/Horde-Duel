@@ -28,10 +28,12 @@ function loadPage(html) {
 
 function createSim(page, io) {
   const intervals = new Set();
+  const timeouts = new Set();
   const sandbox = {
     console: { log() {}, error: (...a) => console.error('[sim]', ...a), warn() {} },
     performance, Math, JSON,
-    setTimeout, clearTimeout,
+    setTimeout: (f, ms, ...a) => { const h = setTimeout(() => { timeouts.delete(h); f(...a); }, ms); timeouts.add(h); return h; },
+    clearTimeout: h => { clearTimeout(h); timeouts.delete(h); },
     setInterval: (f, ms) => { const h = setInterval(f, ms); intervals.add(h); return h; },
     clearInterval: h => { clearInterval(h); intervals.delete(h); },
     requestAnimationFrame() { return 0; }, cancelAnimationFrame() {},
@@ -55,7 +57,7 @@ function createSim(page, io) {
   if (!api) throw new Error('simulation API missing');
   return {
     api,
-    stop() { for (const h of intervals) clearInterval(h); intervals.clear(); api.NET.live = false; api.NET.m = null; }
+    stop() { for (const h of intervals) clearInterval(h); intervals.clear(); for (const h of timeouts) clearTimeout(h); timeouts.clear(); api.NET.live = false; api.NET.m = null; }
   };
 }
 module.exports = { loadPage, createSim };

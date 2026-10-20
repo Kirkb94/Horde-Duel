@@ -164,7 +164,7 @@ function netAct2(act,v){
 }
 
 // ---------- host: start / drops ----------
-function netDropInfo(){const fs=G.fighters.slice(0,N_FIGHT);return{map:MAPID,dn:G.dropNo,sc:G.sc,ups:fs.map(f=>f.ups),pos:fs.map(f=>[Math.round(f.x),Math.round(f.y),q2(f.facing)])}}
+function netDropInfo(){const fs=G.fighters.slice(0,N_FIGHT);return{map:MAPID,dn:G.dropNo,su:G.sudden?1:0,sc:G.sc,ups:fs.map(f=>f.ups),pos:fs.map(f=>[Math.round(f.x),Math.round(f.y),q2(f.facing)])}}
 function netBuild(pl,cfg,localPid){
   const mapId=(cfg.map&&MAPS[cfg.map])?cfg.map:Object.keys(MAPS)[Math.floor(Math.random()*3)];setMap(mapId);
   const hn=pl.length,c=setupMode(Object.assign({},cfg,{n:Math.max(cfg.size||cfg.n||16,hn)}));
@@ -241,7 +241,7 @@ function controlRemote(f,dt){
 function netBroadcastRes(){
   const fs=G.fighters.slice(0,N_FIGHT),fin=fs.some(f=>f.wins>=WIN_DROPS),st=fs.map(f=>[f.wins,f.pts,f.kills,f.place,f.dropKills,f.level]);
   NET.ready={};if(NET.srv)NET.ready[NET.pid]=true;NET.betT=performance.now()+50000;
-  for(const pid in NET.cl){const f=NET.cl[pid].f;netRel(+pid,{k:'res',dn:G.dropNo,fin,w:G.winner?G.winner.id:0,st,pk:fin?0:(f.pend||0)+1,reel:fin?reelGet():undefined})}
+  for(const pid in NET.cl){const f=NET.cl[pid].f;netRel(+pid,{k:'res',dn:G.dropNo,fin,w:G.winner?G.winner.id:-1,dr:G.draw?1:0,st,pk:fin?0:(f.pend||0)+1,reel:fin?reelGet():undefined})}
 }
 function netEndRow(){return (G.reel?'<button class="go ghost" data-act="reel">Highlights</button>':'')+(NET.role==='host'?'<button class="go" data-act="n_rematch">Rematch</button><button class="go ghost" data-act="n_lobby">Back to lobby</button>':'')+'<button class="go ghost" data-act="menu">Leave</button>'}
 const dropResults0=dropResults;
@@ -338,6 +338,7 @@ function netOnStart(d){
   G.debug=false;G.zmode=false;if(DIFF[d.diff])G.diff=d.diff;G.fighters=[];setupMode(d.cfg);
   d.ros.forEach((r,i)=>{const f=makeFighter(i,r[2]);f.name=r[1];f.pid=r[0];f.isAI=r[0]!==NET.pid;if(r[3]>=0)f.team=r[3];f.pend=0;f.tx=f.x;f.ty=f.y;f.tf=0;G.fighters.push(f);if(r[0]===NET.pid)NET.my=i});
   G.P=G.fighters[NET.my];G.P.isAI=false;G.dropNo=1;
+  reelClose(false);G.reel=null;
   netApplyDrop(d.drop);
 }
 function netApplyDrop(d){
@@ -345,7 +346,7 @@ function netApplyDrop(d){
   G.fighters=fs;NET.zm.clear();
   fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
-  if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
+  if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sudden=!!d.su;G.draw=false;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;boReset();G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
   G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
   SFX.drop();G.mode='count';G.countdown=3.2;hide();showHUD(true);
 }
@@ -509,7 +510,7 @@ function netSendInput(){
 function netClientResults(d){
   const fs=G.fighters.slice(0,N_FIGHT),P=G.P;
   d.st.forEach((s,i)=>{const f=fs[i];f.wins=s[0];f.pts=s[1];f.kills=s[2];f.place=s[3];f.dropKills=s[4];f.level=s[5]});
-  G.winner=fs[d.w];G.reel=d.reel||null;G.mode=d.fin?'over':'between';G.pickCtx='between';NET.pk=d.pk;NET.tot=d.pk;NET.picks=[];G.pending=0;
+  G.winner=fs[d.w]||null;G.draw=!!d.dr;G.reel=d.reel||null;G.mode=d.fin?'over':'between';G.pickCtx='between';NET.pk=d.pk;NET.tot=d.pk;NET.picks=[];G.pending=0;
   if(d.fin){
     showHUD(false);const champ=standings()[0];
     show(`<p class="eyebrow">Match over</p><h2>${champ===P?'You win the match':isAlly(champ,P)?'Your team wins the match':esc(champ.name)+' wins the match'}</h2>
@@ -524,8 +525,8 @@ function netShowOffers(first){
   const P=G.P,o=offers(P,3);
   if(!o.length){netClientDone();return}
   const won=G.winner===P;
-  show(`<p class="eyebrow">Drop ${G.dropNo} complete</p><h2>${first?(won?'You won the drop':'Drop over'):'Pick another upgrade'}</h2>
-    ${first?`<p class="lede">${won?'Last one standing':'You placed #'+P.place+' of '+N_FIGHT+' with '+P.dropKills+' kill'+(P.dropKills===1?'':'s')}. First to ${WIN_DROPS} drop wins takes the match.</p>${standingsHTML(5)}`:''}
+  show(`<p class="eyebrow">Drop ${G.dropNo} complete</p><h2>${first?(won?'You won the drop':G.draw?'Draw':'Drop over'):'Pick another upgrade'}</h2>
+    ${first?`<p class="lede">${won?'Last one standing':(G.draw?'Draw, no win awarded. ':'')+'You placed #'+P.place+' of '+N_FIGHT+' with '+P.dropKills+' kill'+(P.dropKills===1?'':'s')}. First to ${WIN_DROPS} drop wins takes the match.</p>${standingsHTML(5)}`:''}
     <p class="lede">Upgrade ${NET.tot-NET.pk+1} of ${NET.tot}. Pick yours.</p>${cardsHTML(o,1)}`);
 }
 function netClientPick(v,m){
