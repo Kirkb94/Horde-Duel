@@ -111,7 +111,8 @@ wss.on('connection', (ws, req) => {
         for (const r of rooms.values()) if (!r.started && r.players.size < MAX_PLAYERS && (!best || r.players.size > best.players.size)) best = r;
         if (!best) {
           if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
-          const code = newCode(); best = { code, players: new Map(), host: 0, started: false, created: Date.now() }; rooms.set(code, best);
+          const code = newCode(); if (!code) return send(ws, { t: 'err', msg: 'No room codes free.' });
+          best = { code, players: new Map(), host: 0, started: false, created: Date.now() }; rooms.set(code, best);
         }
         return joinRoom(ws, best, m.name, m.weapon);
       }

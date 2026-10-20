@@ -294,7 +294,9 @@ function expireHold(room, token) {
   const h = room.held.get(token);
   if (!h) return;
   room.held.delete(token);
-  if (room.heldHost === h.p.pid) room.heldHost = 0;
+  const hostLost = room.heldHost === h.p.pid;
+  if (hostLost) room.heldHost = 0;
+  if (hostLost && !room.auth) { closeRelayRoom(room, 'The host did not come back in time.'); return; }
   if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); }
 }
 function abortMatch(room, why) {
@@ -392,13 +394,45 @@ function leaveRoom(ws, hold) {
     bcastPlayers(room); return;
   }
   if (p.pid === room.host) {
-    for (const q of room.players.values()) { send(q.ws, { t: 'closed', reason: 'The host left the match.' }); q.ws.room = null; q.ws.p = null; }
-    rooms.delete(room.code);
+    if (hold && p.token && room.started) {   // relay host dropped mid-match: hold the room so they can rejoin
+      room.held.set(p.token, { p, timer: setTimeout(() => expireHold(room, p.token), HOLD_MS) });
+      room.heldHost = p.pid;
+      for (const q of room.players.values()) send(q.ws, { t: 'hostlost', ms: HOLD_MS });
+      return;
+    }
+    closeRelayRoom(room, 'The host left the match.');
     return;
   }
   const h = room.players.get(room.host);
   if (h) send(h.ws, { t: 'left', pid: p.pid });
-  if (!room.players.size) rooms.delete(room.code); else { balanceTeams(room); bcastPlayers(room); }
+  else if (room.heldHost) (room.lostPids || (room.lostPids = [])).push(p.pid);   // host is away: tell them on return
+  if (!room.players.size && !room.held.size) { clearHolds(room); rooms.delete(room.code); }
+  else if (room.players.size) { balanceTeams(room); bcastPlayers(room); }
+}
+function closeRelayRoom(room, reason) {
+  clearHolds(room);
+  for (const q of room.players.values()) { send(q.ws, { t: 'closed', reason }); q.ws.room = null; q.ws.p = null; }
+  room.players.clear();
+  stopSim(room);
+  rooms.delete(room.code);
+}
+// Relay mode: the held host reclaims the room with the token from their 'joined' message.
+function relayRejoin(ws, r, tok) {
+  const h = tok && r.held ? r.held.get(tok) : null;
+  let q = h && r.heldHost === h.p.pid ? h.p : null;
+  if (!q && tok && r.started) { const c = r.players.get(r.host); if (c && tokEq(c.token, tok)) q = c; }   // old socket not yet noticed as dead
+  if (!q) return rejoinFail(ws, 'Could not rejoin: that room is no longer held.');
+  if (h) { clearTimeout(h.timer); r.held.delete(tok); }
+  r.heldHost = 0;
+  const old = q.ws;
+  if (old && old !== ws) { old.p = null; old.room = null; send(old, { t: 'closed', reason: 'You reconnected to this match from another connection.' }); try { old.close(1000, 'replaced'); } catch (e) {} }
+  q.ws = ws; ws.p = q; ws.room = r; ws.rjFails = 0;
+  r.players.set(q.pid, q);
+  send(ws, { t: 'joined', token: q.token, auth: r.auth, cfg: r.cfg, code: r.code, pid: q.pid, host: r.host, players: list(r), started: r.started, rejoined: true });
+  for (const pid of r.lostPids || []) send(ws, { t: 'left', pid });
+  r.lostPids = null;
+  for (const g of r.players.values()) if (g !== q) send(g.ws, { t: 'hostback' });
+  bcastPlayers(r);
 }
 
 wss.on('connection', (ws, req) => {
@@ -494,10 +528,10 @@ wss.on('connection', (ws, req) => {
         } return;
       case 'lobby': if (room && p && p.pid === room.host) { clearHolds(room); stopSim(room); room.started = false; bcastPlayers(room); } return;
       case 'rejoin': {
-        if (MODE !== 'auth') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server.", rejoin: false });
         if (ws.rjFails >= MAX_REJOIN_FAILS) return;
         const r = rooms.get(clean(m.code, 4).toUpperCase());
         const tok = typeof m.token === 'string' && /^[0-9a-f]{32}$/.test(m.token) ? m.token : null;
+        if (r && !r.auth) return relayRejoin(ws, r, tok);
         const h = r && r.held && tok ? r.held.get(tok) : null;
         let live = null;   // slot still attached to a half-dead socket the server hasn't noticed is gone yet
         if (!h && r && r.sim && tok) for (const q0 of r.players.values()) if (tokEq(q0.token, tok)) { live = q0; break; }
