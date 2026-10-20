@@ -26,7 +26,7 @@ Your own movement is predicted locally so it stays responsive. In `auth` mode ev
 **Free plan:** the sim needs more CPU than the free instance offers, so use `MODE=relay` there. Free services also sleep after about 15 minutes idle (first player waits up to a minute).
 
 ## Rejoin (auth mode only)
-If a player drops mid-match, `MODE=auth` keeps their slot for a short time so they can rejoin the same match with their session token. `MODE=relay` does not support rejoin: the match lives in the creator's browser, so the server has nothing to hand back. A relay server answers a rejoin attempt with "Rejoin isn't available on this server", and a dropped player has to start or join a new room.
+If a player drops mid-match, `MODE=auth` keeps their slot for a short time so they can rejoin the same match. The private session token the server issues when you join (not the socket ID or player ID) is the rejoin identity: the browser keeps it in `sessionStorage` for that tab, and the server only accepts a 32-hex token that matches a held slot, closes any stale old connection, and resends the match state. A socket gets 5 failed attempts before it is closed. The client shows "Reconnecting…" and retries for about 25 seconds (the slot is held for 30). `MODE=relay` does not support rejoin: the match lives in the creator's browser, so the server has nothing to hand back. A relay server answers a rejoin attempt with "Rejoin isn't available on this server", and a dropped player has to start or join a new room.
 
 ## Settings (environment variables)
 - `MODE` = `auth` or `relay`

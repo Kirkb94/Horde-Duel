@@ -3976,21 +3976,54 @@ function netConnect(then){
 setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&Date.now()-(NET.rx||0)>12000){netDropped('Lost connection to the server (timed out).');return}netSend({t:'ping',ts:Date.now()})}},3000);
 document.addEventListener('visibilitychange',()=>{NET.rx=Date.now()});
 function netCleanup(){NET.live=false;NET.m=null;NET.paused=false;NET.zm.clear();NET.inp={};NET.cl={};NET.ready={};NET.acts=[];G.fighters=[];G.P=null;G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.spectating=false;G.pOut=false;G.mode='menu';showHUD(false)}
+// ---------- session token + auto-reconnect (auth mode) ----------
+const REJOIN_MS=25000;   // stay under the server's 30s slot hold
+function netSess(){try{const s=JSON.parse(sessionStorage.getItem('hordesess')||'null');return s&&/^[A-Z]{4}$/.test(s.code)&&/^[0-9a-f]{32}$/.test(s.token)?s:null}catch(e){return null}}
+function netSessSave(m){try{if(m.auth&&m.token)sessionStorage.setItem('hordesess',JSON.stringify({code:m.code,token:m.token}));else sessionStorage.removeItem('hordesess')}catch(e){}}
+function netSessClear(){try{sessionStorage.removeItem('hordesess')}catch(e){}}
+function netRecoStop(){if(NET.reco){clearTimeout(NET.reco.tm);NET.reco=null}}
+function netRecoShow(){NET.view='reco';G.mode='menu';show(`<p class='eyebrow'>Connection lost</p><h1>Reconnecting<em>…</em></h1><p class='lede'>Trying to get you back into your match${NET.reco&&NET.reco.n?' (attempt '+(NET.reco.n+1)+')':''}. A bot plays your fighter meanwhile.</p><button class='go ghost' data-act='n_leave'>Give up</button>`)}
+function netRecoFail(msg){netRecoStop();netSessClear();if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();NET.notice=msg||'Could not reconnect to the match.';netMenu()}
+function netRecoNext(){
+  const R=NET.reco;if(!R)return;
+  R.n++;const d=Math.min(4000,1000*Math.pow(2,R.n-1));
+  if(Date.now()-R.t0+d>REJOIN_MS){netRecoFail('Could not reconnect to the match.');return}
+  clearTimeout(R.tm);R.tm=setTimeout(netRecoTry,d);
+}
+function netRecoTry(){
+  const R=NET.reco;if(!R)return;
+  if(Date.now()-R.t0>REJOIN_MS){netRecoFail('Could not reconnect to the match.');return}
+  netRecoShow();
+  let ws;try{ws=new WebSocket(netUrl())}catch(e){netRecoNext();return}
+  NET.ws=ws;const to=setTimeout(()=>{try{ws.close()}catch(_){}},6000);
+  ws.onopen=()=>{clearTimeout(to);NET.rx=Date.now();const s=netSess();if(!s){netRecoFail('Could not reconnect to the match.');return}netSend({t:'rejoin',code:s.code,token:s.token})};
+  ws.onmessage=e=>{NET.rx=Date.now();let m;try{m=JSON.parse(e.data)}catch(_){return}netMsg(m)};
+  ws.onclose=()=>{clearTimeout(to);if(NET.ws===ws){NET.ws=null;if(NET.reco)netRecoNext();else netDropped('Lost connection to the server.')}};
+  ws.onerror=()=>{};
+}
+function netRecoBegin(){
+  if(!(NET.reco||(NET.auth&&NET.live&&netSess())))return false;
+  if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}
+  if(NET.reco){netRecoNext();return true}
+  NET.reco={t0:Date.now(),n:0,tm:0};NET.code='';NET.role=null;NET.players=[];NET.status='';NET.notice='';netCleanup();
+  netRecoTry();return true;
+}
 function netDropped(msg){
+  if(netRecoBegin())return;
   const had=NET.code||NET.live||NET.status;
   NET.code='';NET.role=null;NET.status='';NET.players=[];if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}
   netCleanup();if(had)NET.notice=msg||'Disconnected.';netMenu();
 }
-function netLeave(){netSend({t:'leave'});if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();menu()}
+function netLeave(){netRecoStop();netSessClear();netSend({t:'leave'});if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();menu()}
 function netMsg(m){
   switch(m.t){
-    case'joined':NET.auth=!!m.auth;if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';netLobby();break;
+    case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined)netRecoStop();if(m.rejoined&&m.started){NET.status='';break}netLobby();break;
     case'players':
       NET.players=m.players;NET.hostPid=m.host;if(m.cfg)NET.cfg=m.cfg;NET.role=NET.pid===m.host?'host':'client';
       if(!m.started&&NET.live){netCleanup();netLobby()}else if(!NET.live)netLobby();break;
     case'left':if(NET.m==='host')netBotify(m.pid);break;
-    case'closed':NET.code='';NET.role=null;if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netCleanup();NET.notice=m.reason||'The room was closed.';netMenu();break;
-    case'err':NET.status='';NET.notice=m.msg||'Error';if(NET.code)netLobby();else netMenu();break;
+    case'closed':netRecoStop();netSessClear();NET.code='';NET.role=null;if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netCleanup();NET.notice=m.reason||'The room was closed.';netMenu();break;
+    case'err':if(NET.reco){if(m.rejoin===false)netRecoFail(m.msg);else{if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netRecoNext()}break}if(m.rejoin===false)netSessClear();NET.status='';NET.notice=m.msg||'Error';if(NET.code)netLobby();else netMenu();break;
     case'pong':NET.rtt=Math.max(0,Date.now()-m.ts);NET.lag=Math.min(.12,NET.rtt/2000+.03);break;
     case'r':netRecv(m.from,m.d);break;
   }
@@ -4111,6 +4144,10 @@ function netRejoin(pid){
   f.isAI=false;f.remote=true;f.pend=0;f.wantFire=false;
   NET.cl[pid]={f,evi:NET.evBase+NET.ev.length,sv:f.id};
   feedAdd(f.name+' reconnected',false);return true;
+}
+function netResync(pid){
+  if(!NET.cl[pid])return false;
+  netRel(pid,{k:'start',ros:netRoster(),cfg:G.cfg,diff:G.diff,drop:netDropInfo()});return true;
 }
 function netBotify(pid){
   const c=NET.cl[pid];if(!c)return;
@@ -4459,6 +4496,6 @@ window.__net=NET;
 
 function update(dt){update0(dt);if(NET.m==='host')netHostTick(dt)}
 
-if(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,rejoin:netRejoin,humans:netHumans,NET,G};}else{pfInit();resize();menu();requestAnimationFrame(frame);}
+if(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,rejoin:netRejoin,resync:netResync,humans:netHumans,NET,G};}else{pfInit();resize();menu();requestAnimationFrame(frame);}
 })();
 </script>

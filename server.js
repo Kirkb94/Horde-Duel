@@ -14,6 +14,8 @@ const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 16;
 const HOLD_MS = 30000;   // how long a disconnected player's slot is held for rejoin (auth mode)
 const newToken = () => crypto.randomBytes(16).toString('hex');
+const MAX_REJOIN_FAILS = 5;   // failed rejoin attempts allowed per socket before it is closed
+const tokEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 // MODE=auth  : the server runs the match (recommended, needs a paid Render instance for CPU)
 // MODE=relay : the room creator's browser runs the match and the server only forwards messages (fine on the free plan)
 const MODE = process.env.MODE === 'relay' ? 'relay' : 'auth';
@@ -128,6 +130,11 @@ function roomLimited(ws) {
 
 const clean = (s, n) => String(s == null ? '' : s).replace(/[^\w \-.!?]/g, '').trim().slice(0, n);
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
+function rejoinFail(ws, msg) {
+  ws.rjFails = (ws.rjFails || 0) + 1;
+  send(ws, { t: 'err', msg, rejoin: false });
+  if (ws.rjFails >= MAX_REJOIN_FAILS) { try { ws.close(1008, 'too many rejoin attempts'); } catch (e) {} }
+}
 
 // Per-connection message limits: lobby traffic and game input are counted separately.
 const LOBBY_PER_SEC = +(process.env.LOBBY_MSGS_PER_SEC || 20);
@@ -276,6 +283,7 @@ function joinRoom(ws, room, name, weapon) {
 function leaveRoom(ws, hold) {
   const room = ws.room, p = ws.p;
   if (!room || !p) return;
+  if (p.ws !== ws) { ws.room = null; ws.p = null; return; }   // this socket was replaced by a rejoin: it no longer owns the player
   room.players.delete(p.pid);
   ws.room = null; ws.p = null;
   if (room.auth) {
@@ -307,7 +315,7 @@ wss.on('connection', (ws, req) => {
   }
   ipConns.set(ws.ip, nConn);
   ws.isAlive = true; ws.msgs = 0; ws.room = null; ws.p = null;
-  ws.gWin = ws.lWin = ws.jWin = 0; ws.gN = ws.lN = ws.jN = 0; ws.drops = 0; ws.lWarned = false;
+  ws.gWin = ws.lWin = ws.jWin = 0; ws.gN = ws.lN = ws.jN = 0; ws.drops = 0; ws.lWarned = false; ws.rjFails = 0;
   ws.on('pong', () => { ws.isAlive = true; });
   const rate = setInterval(() => { ws.msgs = 0; }, 1000);
   ws.on('message', (raw) => {
@@ -377,19 +385,26 @@ wss.on('connection', (ws, req) => {
         } return;
       case 'lobby': if (room && p && p.pid === room.host) { clearHolds(room); stopSim(room); room.started = false; bcastPlayers(room); } return;
       case 'rejoin': {
-        if (MODE !== 'auth') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server." });
+        if (MODE !== 'auth') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server.", rejoin: false });
+        if (ws.rjFails >= MAX_REJOIN_FAILS) return;
         const r = rooms.get(clean(m.code, 4).toUpperCase());
-        const h = r && r.held && typeof m.token === 'string' ? r.held.get(m.token) : null;
-        if (!h || !r.sim) return send(ws, { t: 'err', msg: 'Could not rejoin: that slot is no longer held.', rejoin: false });
+        const tok = typeof m.token === 'string' && /^[0-9a-f]{32}$/.test(m.token) ? m.token : null;
+        const h = r && r.held && tok ? r.held.get(tok) : null;
+        let live = null;   // slot still attached to a half-dead socket the server hasn't noticed is gone yet
+        if (!h && r && r.sim && tok) for (const q0 of r.players.values()) if (tokEq(q0.token, tok)) { live = q0; break; }
+        if ((!h && !live) || !r.sim) return rejoinFail(ws, 'Could not rejoin: that slot is no longer held.');
         if (typeof r.sim.api.rejoin !== 'function') return send(ws, { t: 'err', msg: 'Rejoin is not supported by this build yet.', rejoin: false });
-        let ok = false; try { ok = !!r.sim.api.rejoin(h.p.pid); } catch (e) { console.error('rejoin failed', e); }
+        let ok = false; try { ok = !!r.sim.api.rejoin((h ? h.p : live).pid); } catch (e) { console.error('rejoin failed', e); }
         if (!ok) return send(ws, { t: 'err', msg: 'Could not rejoin the match.', rejoin: false });
-        if (ws.room) leaveRoom(ws);
-        clearTimeout(h.timer); r.held.delete(m.token);
-        const q = h.p; q.ws = ws; ws.p = q; ws.room = r;
+        if (ws.room && ws.p !== (h ? h.p : live)) leaveRoom(ws);
+        if (h) { clearTimeout(h.timer); r.held.delete(tok); }
+        const q = h ? h.p : live, old = q.ws;
+        if (old && old !== ws) { old.p = null; old.room = null; send(old, { t: 'closed', reason: 'You reconnected to this match from another connection.' }); try { old.close(1000, 'replaced'); } catch (e) {} }
+        q.ws = ws; ws.p = q; ws.room = r; ws.rjFails = 0;
         r.players.set(q.pid, q);
         if (!r.players.has(r.host)) r.host = q.pid;
         send(ws, { t: 'joined', token: q.token, auth: r.auth, cfg: r.cfg, code: r.code, pid: q.pid, host: r.host, players: list(r), started: r.started, rejoined: true });
+        try { if (typeof r.sim.api.resync === 'function') r.sim.api.resync(q.pid); } catch (e) { console.error('resync failed', e); }
         return bcastPlayers(r);
       }
       case 'leave': return leaveRoom(ws);
