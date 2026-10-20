@@ -2476,8 +2476,18 @@ function stepFighter(f,dt){
 const roundOver=()=>{if(G.cfg.mode!=='team')return aliveCount()<=1;let t0=false,t1=false;for(const f of G.fighters)if(f.alive&&!f.zomb){if(f.team)t1=true;else t0=true}return !(t0&&t1)};
 const aliveCount=()=>{let n=0;for(const f of G.fighters)if(f.alive&&!f.zomb)n++;return n};
 const pickMap=()=>{const k=Object.keys(MAPS);return G.gmap==='random'||!MAPS[G.gmap]?k[Math.floor(Math.random()*k.length)]:G.gmap};
+// resetMatch(): single place for per-MATCH state. Per-round state stays in startDrop/netApplyDrop.
+// Checklist: reel closed + clips cleared (listeners are gated on REEL.on) | draw/sudden counters, winner, ff |
+// zombie counters + horde timers | pending picks | mode flags. Fighters/bots/G.P are rebuilt by each start path;
+// bots' AI state is re-seeded in startDrop; NET.* fields are reset by the net start functions.
+function resetMatch(){
+  if(typeof REEL!=='undefined'&&REEL.on)reelClose(false);
+  G.reel=null;REC.clips.length=0;REC.lk={};REC.ring.length=0;REC.acc=0;REC.open.length=0;
+  G.debug=false;G.zmode=false;G.dropNo=1;G.drawN=0;G.draw=false;G.sudden=false;G.winner=null;G.ff=false;
+  G.pending=0;G.afterPick=false;G.zKills=0;G.zid=0;G.wave=0;G.hzT=0;G.hzN=0;
+}
 function startMatch(){
-  G.debug=false;G.zmode=false;G.fighters=[];setMap(pickMap());
+  resetMatch();G.debug=false;G.zmode=false;G.fighters=[];setMap(pickMap());
   const mc=setupMode({mode:G.gmode,n:G.gsize});
   for(let i=0;i<N_FIGHT;i++){const f=makeFighter(i,i===0?G.pick:WKEYS[Math.floor(Math.random()*WKEYS.length)]);if(mc.mode==='team')f.team=i<2?0:1;G.fighters.push(f)}
   G.P=G.fighters[0];G.dropNo=1;startDrop();
@@ -2485,7 +2495,7 @@ function startMatch(){
 const SPEEDS=[1,2,4,8];
 function cycleSpeed(){G.speedIdx=(G.speedIdx+1)%SPEEDS.length}
 function startDebug(){
-  setupMode({mode:'br',n:16});G.zmode=false;G.debug=true;G.dbgMode=0;G.speedIdx=0;G.fighters=[];
+  resetMatch();setupMode({mode:'br',n:16});G.zmode=false;G.debug=true;G.dbgMode=0;G.speedIdx=0;G.fighters=[];
   for(let i=0;i<N_FIGHT;i++){const f=makeFighter(i,WKEYS[Math.floor(Math.random()*WKEYS.length)]);if(i===0){f.isAI=true;f.name='Ash';f.skill=rnd(.85,1.15)}G.fighters.push(f)}
   G.P=G.fighters[0];G.dropNo=1;startDrop();
 }
@@ -2535,7 +2545,7 @@ function makeZombie(kind,x,y,wave){
   z.hp=z.zhp;z.facing=Math.random()*TAU;z.ai.pathT=Math.random()*2;return z;
 }
 function startZombies(){
-  setupMode({mode:'br',n:16});G.debug=false;G.zmode=true;G.zKills=0;G.zid=0;G.wave=0;
+  resetMatch();setupMode({mode:'br',n:16});G.debug=false;G.zmode=true;G.zKills=0;G.zid=0;G.wave=0;
   const P=makeFighter(0,G.pick);G.fighters=[P];G.P=P;G.dropNo=1;
   startDrop();
   P.x=MID;P.y=MID;for(let k=0;k<40&&blocked(P.x,P.y,40);k++){P.x=MID+rnd(-300,300);P.y=MID+rnd(-300,300)}
@@ -3985,16 +3995,17 @@ setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&Date.now
 document.addEventListener('visibilitychange',()=>{NET.rx=Date.now()});
 function netCleanup(){NET.live=false;NET.m=null;NET.paused=false;NET.zm.clear();NET.inp={};NET.cl={};NET.ready={};NET.acts=[];G.fighters=[];G.P=null;G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.spectating=false;G.pOut=false;G.mode='menu';showHUD(false)}
 // ---------- session token + auto-reconnect (auth mode) ----------
-const REJOIN_MS=25000;   // stay under the server's 30s slot hold
+const REJOIN_MS=28000;   // stay under the server's 30s slot hold
 function netSess(){try{const s=JSON.parse(sessionStorage.getItem('hordesess')||'null');return s&&/^[A-Z]{4}$/.test(s.code)&&/^[0-9a-f]{32}$/.test(s.token)?s:null}catch(e){return null}}
 function netSessSave(m){try{if(m.auth&&m.token)sessionStorage.setItem('hordesess',JSON.stringify({code:m.code,token:m.token}));else sessionStorage.removeItem('hordesess')}catch(e){}}
 function netSessClear(){try{sessionStorage.removeItem('hordesess')}catch(e){}}
+function netResume(){if(SIM||NET.reco||NET.ws)return;const s=netSess();if(!s)return;NET.auth=true;NET.reco={t0:Date.now(),n:0,tm:0};netRecoTry()}
 function netRecoStop(){if(NET.reco){clearTimeout(NET.reco.tm);NET.reco=null}}
 function netRecoShow(){NET.view='reco';G.mode='menu';show(`<p class='eyebrow'>Connection lost</p><h1>Reconnecting<em>…</em></h1><p class='lede'>Trying to get you back into your match${NET.reco&&NET.reco.n?' (attempt '+(NET.reco.n+1)+')':''}. A bot plays your fighter meanwhile.</p><button class='go ghost' data-act='n_leave'>Give up</button>`)}
 function netRecoFail(msg){netRecoStop();netSessClear();if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();NET.notice=msg||'Could not reconnect to the match.';netMenu()}
 function netRecoNext(){
   const R=NET.reco;if(!R)return;
-  R.n++;const d=Math.min(4000,1000*Math.pow(2,R.n-1));
+  R.n++;const d=Math.min(2000,1000*Math.pow(2,R.n-1));
   if(Date.now()-R.t0+d>REJOIN_MS){netRecoFail('Could not reconnect to the match.');return}
   clearTimeout(R.tm);R.tm=setTimeout(netRecoTry,d);
 }
@@ -4025,10 +4036,10 @@ function netDropped(msg){
 function netLeave(){netRecoStop();netSessClear();netSend({t:'leave'});if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();menu()}
 function netMsg(m){
   switch(m.t){
-    case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined)netRecoStop();if(m.rejoined&&m.started){NET.status='';break}netLobby();break;
+    case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined)netRecoStop();if(m.started){NET.status='';break}netLobby();break;
     case'players':
       NET.players=m.players;NET.hostPid=m.host;if(m.cfg)NET.cfg=m.cfg;NET.role=NET.pid===m.host?'host':'client';
-      if(!m.started&&NET.live){netCleanup();netLobby()}else if(!NET.live)netLobby();break;
+      if(!m.started&&NET.live){netCleanup();netLobby()}else if(!NET.live&&!m.started)netLobby();break;
     case'left':if(NET.m==='host')netBotify(m.pid);break;
     case'closed':netRecoStop();netSessClear();NET.code='';NET.role=null;if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netCleanup();NET.notice=m.reason||'The room was closed.';netMenu();break;
     case'err':if(NET.reco){if(m.rejoin===false)netRecoFail(m.msg);else{if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netRecoNext()}break}if(m.rejoin===false)netSessClear();NET.status='';NET.notice=m.msg||'Error';if(NET.code)netLobby();else netMenu();break;
@@ -4132,7 +4143,7 @@ function netBuild(pl,cfg,localPid){
 const netRoster=()=>G.fighters.slice(0,N_FIGHT).map(f=>[f.pid||0,f.name,f.weapon,f.team===undefined?-1:f.team]);
 function netHostStart(){
   G.debug=false;G.zmode=false;NET.inp={};NET.ready={};NET.ev=[];NET.evBase=0;
-  netBuild(NET.players.slice(),NET.cfg,NET.pid);
+  resetMatch();netBuild(NET.players.slice(),NET.cfg,NET.pid);
   G.P=G.fighters.find(f=>f.pid===NET.pid)||G.fighters[0];G.dropNo=1;NET.m='host';NET.live=true;NET.resDn=-1;NET.pts=null;NET.paused=false;
   startDrop();
   netRel('*',{k:'start',ros:netRoster(),cfg:G.cfg,diff:G.diff,drop:netDropInfo()});
@@ -4140,7 +4151,7 @@ function netHostStart(){
 function netSrvStart(pl,diff,cfg){
   NET.srv=true;NET.pid=0;NET.hostPid=0;NET.snapMs=50;if(DIFF[diff])G.diff=diff;
   G.debug=false;G.zmode=false;NET.inp={};NET.ready={};NET.ev=[];NET.evBase=0;
-  netBuild(pl,cfg||NET.cfg,0);
+  resetMatch();netBuild(pl,cfg||NET.cfg,0);
   G.P=G.fighters[0];G.dropNo=1;NET.m='host';NET.live=true;NET.resDn=-1;NET.pts=[];NET.paused=false;
   startDrop();
   netRel('*',{k:'start',ros:netRoster(),cfg:G.cfg,diff:G.diff,drop:netDropInfo()});
@@ -4286,7 +4297,7 @@ function netOnStart(d){
   G.debug=false;G.zmode=false;if(DIFF[d.diff])G.diff=d.diff;G.fighters=[];setupMode(d.cfg);
   d.ros.forEach((r,i)=>{const f=makeFighter(i,r[2]);f.name=r[1];f.pid=r[0];f.isAI=r[0]!==NET.pid;if(r[3]>=0)f.team=r[3];f.pend=0;f.tx=f.x;f.ty=f.y;f.tf=0;G.fighters.push(f);if(r[0]===NET.pid)NET.my=i});
   G.P=G.fighters[NET.my];G.P.isAI=false;G.dropNo=1;
-  reelClose(false);G.reel=null;
+  resetMatch();
   netApplyDrop(d.drop);
 }
 function netApplyDrop(d){
@@ -4505,6 +4516,6 @@ window.__net=NET;
 
 function update(dt){update0(dt);if(NET.m==='host')netHostTick(dt)}
 
-if(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,rejoin:netRejoin,resync:netResync,humans:netHumans,NET,G};}else{pfInit();resize();menu();requestAnimationFrame(frame);}
+if(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,rejoin:netRejoin,resync:netResync,humans:netHumans,NET,G};}else{pfInit();resize();menu();requestAnimationFrame(frame);netResume();}
 })();
 </script>

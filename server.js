@@ -17,6 +17,29 @@ const HOLD_MS = envMs('HOLD_MS', 30000);   // how long a disconnected player's s
 const SWEEP_MS = envMs('SWEEP_MS', 10000);   // sweeper interval
 const ROOM_MAX_AGE_MS = envMs('ROOM_MAX_AGE_MS', 6 * 3600e3);   // unstarted lobbies older than this are removed
 const newToken = () => crypto.randomBytes(16).toString('hex');
+const SLOW_BUF = envMs('SLOW_BUF', 200000);          // above this many queued bytes, stale snapshots are dropped for that socket
+const HARD_BUF = envMs('HARD_BUF', 4 * 1024 * 1024);  // above this for HARD_BUF_MS the socket is terminated
+const HARD_BUF_MS = envMs('HARD_BUF_MS', 5000);
+// Returns true if the socket was terminated for staying over the hard buffer cap.
+function slowCheck(ws) {
+  if (ws.bufferedAmount > HARD_BUF) {
+    const now = Date.now();
+    if (!ws.overSince) ws.overSince = now;
+    else if (now - ws.overSince >= HARD_BUF_MS) {
+      console.error('terminating slow socket (' + ws.bufferedAmount + ' bytes queued for ' + (now - ws.overSince) + ' ms)');
+      try { ws.terminate(); } catch (e) {}
+      return true;
+    }
+  } else ws.overSince = 0;
+  return false;
+}
+// Single send path for relayed/sim messages: drops stale snapshots to slow links, enforces the hard cap.
+function relaySend(p, str, d) {
+  if (!p || !p.ws || p.ws.readyState !== 1) return;
+  if (slowCheck(p.ws)) return;
+  if (d && d.k === 's' && p.ws.bufferedAmount > SLOW_BUF) return;   // drop stale snapshots for slow links
+  p.ws.send(str);
+}
 const MAX_REJOIN_FAILS = 5;   // failed rejoin attempts allowed per socket before it is closed
 const tokEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 // MODE=auth  : the server runs the match (recommended, needs a paid Render instance for CPU)
@@ -101,7 +124,27 @@ function serveStatic(req, res, url) {
 }
 
 server.on('connection', s => s.setNoDelay(true));
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 256 * 1024, perMessageDeflate: process.env.DEFLATE === '0' ? false : { threshold: 600, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: true, clientNoContextTakeover: true, concurrencyLimit: 10 } });
+// Cross-site WebSocket hijacking guard: browsers always send Origin on WS handshakes, so a page on another site can be detected.
+// Allowed: no Origin (non-browser clients), same host as the request, or an entry in ALLOWED_ORIGINS (comma list of origins or bare hosts).
+const normOrigin = s => String(s || '').trim().toLowerCase().replace(/\/+$/, '');
+const originHost = o => { try { return new URL(o).host.toLowerCase(); } catch (e) { return ''; } };
+const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').concat(process.env.RENDER_EXTERNAL_URL || '').map(normOrigin).filter(Boolean);
+function originAllowed(origin, host) {
+  if (origin == null || origin === '') return true;
+  const o = normOrigin(origin);
+  if (o === 'null') return false;
+  const oh = originHost(o);
+  if (!oh) return false;
+  if (host && oh === String(host).toLowerCase()) return true;
+  return ALLOWED_ORIGINS.some(a => a === o || a === oh || originHost(a) === oh && /^https?:\/\//.test(a) && a.split('://')[0] === o.split('://')[0]);
+}
+function verifyOrigin(info, cb) {
+  const origin = info.origin || (info.req && info.req.headers && info.req.headers.origin);
+  if (originAllowed(origin, info.req && info.req.headers && info.req.headers.host)) return cb(true);
+  console.warn('ws: rejected origin', String(origin).slice(0, 100));
+  cb(false, 403, 'Forbidden origin');
+}
+const wss = new WebSocketServer({ server, path: '/ws', verifyClient: verifyOrigin, maxPayload: 256 * 1024, perMessageDeflate: process.env.DEFLATE === '0' ? false : { threshold: 600, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: true, clientNoContextTakeover: true, concurrencyLimit: 10 } });
 
 const rooms = new Map();   // code -> room
 let nextPid = 1;
@@ -109,12 +152,13 @@ let nextPid = 1;
 // Per-IP abuse limits (override with env vars). Loopback is exempt for local testing.
 const MAX_CONN_PER_IP = +(process.env.MAX_CONN_PER_IP || 8);
 const ROOMS_PER_MIN = +(process.env.ROOMS_PER_MIN || 6);
-const XFF_HOPS = +(process.env.XFF_HOPS || 0);   // 0 = trust first X-Forwarded-For entry; N = take Nth entry from the right (strict, set to your trusted proxy count)
+// Number of trusted proxies in front of the server (Render = 1). N = take Nth X-Forwarded-For entry from the right; 0 = ignore the header, use the socket address.
+const XFF_HOPS = process.env.XFF_HOPS !== undefined && process.env.XFF_HOPS !== '' && !isNaN(+process.env.XFF_HOPS) ? Math.max(0, Math.floor(+process.env.XFF_HOPS)) : 1;
 const ipConns = new Map();   // ip -> open socket count
 const ipRooms = new Map();   // ip -> timestamps of recent room creations
 function clientIp(req) {
   const xff = String((req.headers && req.headers['x-forwarded-for']) || '').split(',').map(s => s.trim()).filter(Boolean);
-  let ip = xff.length ? (XFF_HOPS > 0 ? xff[Math.max(0, xff.length - XFF_HOPS)] : xff[0]) : (req.socket && req.socket.remoteAddress) || 'unknown';
+  let ip = (XFF_HOPS > 0 && xff.length) ? xff[Math.max(0, xff.length - XFF_HOPS)] : (req.socket && req.socket.remoteAddress) || 'unknown';
   return String(ip).replace(/^::ffff:/, '').slice(0, 64);
 }
 const isLocalIp = ip => ip === '127.0.0.1' || ip === '::1' || ip === 'unknown';
@@ -230,16 +274,18 @@ function abortMatch(room, why) {
   bcastPlayers(room);   // started=false sends clients back to the lobby
   for (const p of room.players.values()) send(p.ws, { t: 'err', msg: "The match hit a server error and was ended. You're back in the lobby." });
 }
+const DIFFS = ['easy', 'normal', 'hard'];
 function startSim(room, diff) {
+  diff = typeof diff === 'string' && DIFFS.includes(diff) ? diff : 'normal';
   clearHolds(room);
   const players = [...room.players.values()].map(p => ({ pid: p.pid, name: p.name, weapon: p.weapon, team: p.team }));
-  const sendTo = (p, str) => { if (p && p.ws.readyState === 1) p.ws.send(str); };
+  const sendTo = (p, str, d) => relaySend(p, str, d);
   const io = {
     rel(to, d) {
       const str = JSON.stringify({ t: 'r', from: 0, d });
-      if (to === '*') { for (const p of room.players.values()) sendTo(p, str); return; }
+      if (to === '*') { for (const p of room.players.values()) sendTo(p, str, d); return; }
       const p = room.players.get(to);
-      if (p && !(d && d.k === 's' && p.ws.bufferedAmount > 200000)) sendTo(p, str);   // drop stale snapshots for slow links
+      if (p) sendTo(p, str, d);
     }
   };
   room.sim = createSim(loadGame(), io);
@@ -322,6 +368,9 @@ wss.on('connection', (ws, req) => {
   ws.on('pong', () => { ws.isAlive = true; });
   const rate = setInterval(() => { ws.msgs = 0; }, 1000);
   ws.on('message', (raw) => {
+    try { onMsg(raw); } catch (e) { console.error('message handler error', e); }
+  });
+  function onMsg(raw) {
     if (++ws.msgs > 700) return;                      // flood guard
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m.t !== 'string') return;
@@ -365,6 +414,7 @@ wss.on('connection', (ws, req) => {
       }
       case 'upd': {
         if (!room || !p) return;
+        if (room.started) return;                      // roster is locked once the match is running
         if (m.team === 0 || m.team === 1) { const n = [...room.players.values()].filter(q => q !== p && q.team === m.team).length; if (room.cfg.mode !== 'team' || n < 2) p.team = m.team; else send(ws, { t: 'err', msg: 'That team is full.' }); }
         if (typeof m.name === 'string') p.name = uniqueName({ players: new Map([...room.players].filter(([k]) => k !== p.pid)) }, m.name);
         if (WEAPONS.includes(m.weapon)) p.weapon = m.weapon;
@@ -415,9 +465,9 @@ wss.on('connection', (ws, req) => {
         if (!room || !p) return;
         if (room.auth) { if (room.sim) { const d = cleanGameMsg(m.d); if (d) { try { room.sim.api.recv(p.pid, d); } catch (e) {} } } return; }
         if (p.pid === room.host) {
-          if (m.to === '*') { const out = JSON.stringify({ t: 'r', from: p.pid, d: m.d }); for (const q of room.players.values()) if (q !== p && q.ws.readyState === 1) q.ws.send(out); }
+          if (m.to === '*') { const out = JSON.stringify({ t: 'r', from: p.pid, d: m.d }); for (const q of room.players.values()) if (q !== p) relaySend(q, out, m.d); }
           else { const q = room.players.get(m.to); if (q && q.ws.readyState === 1) {
-            if (m.d && m.d.k === 's' && q.ws.bufferedAmount > 200000) return;       // drop stale snapshots for slow links
+            if (slowCheck(q.ws) || (m.d && m.d.k === 's' && q.ws.bufferedAmount > SLOW_BUF)) return;   // drop stale snapshots for slow links, kill hopeless sockets
             q.ws.send(JSON.stringify({ t: 'r', from: p.pid, d: m.d })); } }
         } else {
           const h = room.players.get(room.host); if (h && h.ws.readyState === 1) h.ws.send(JSON.stringify({ t: 'r', from: p.pid, d: m.d }));
@@ -425,7 +475,7 @@ wss.on('connection', (ws, req) => {
         return;
       }
     }
-  });
+  }
   ws.on('close', () => {
     clearInterval(rate); leaveRoom(ws, true);
     const n = (ipConns.get(ws.ip) || 1) - 1; if (n > 0) ipConns.set(ws.ip, n); else ipConns.delete(ws.ip);
@@ -434,12 +484,18 @@ wss.on('connection', (ws, req) => {
 });
 
 function sweep() {
-  for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch (e) {} }
+  try { sweepOnce(); } catch (e) { console.error('sweep error', e); }
+}
+function sweepOnce() {
+  for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } if (slowCheck(ws)) continue; ws.isAlive = false; try { ws.ping(); } catch (e) {} }
   const now = Date.now();                              // sweep empty / abandoned lobbies
   for (const [ip, arr] of ipRooms) { const keep = arr.filter(t => now - t < 60000); if (keep.length) ipRooms.set(ip, keep); else ipRooms.delete(ip); }
   for (const [c, r] of rooms) if ((!r.players.size && !(r.held && r.held.size)) || (!r.started && now - r.created > ROOM_MAX_AGE_MS)) { clearHolds(r); stopSim(r); rooms.delete(c); }
 }
 const sweeper = setInterval(sweep, SWEEP_MS);
+
+process.on('uncaughtException', (err) => { console.error('uncaughtException', err && err.stack || err); });
+process.on('unhandledRejection', (reason) => { console.error('unhandledRejection', reason && reason.stack || reason); });
 
 server.listen(PORT, () => console.log('Horde Duel server listening on :' + server.address().port + ' mode=' + MODE));
 
