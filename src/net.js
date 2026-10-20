@@ -262,6 +262,7 @@ function netSnapFor(c){
       if(dx*dx+dy*dy<ZR2)Z.push(z.id*8+Math.max(0,ZKS.indexOf(z.zk)),Math.round(z.x),Math.round(z.y),Math.round(z.facing*10),Math.max(1,Math.round(z.hp/z.zhp*100))+101*Math.min(1,Math.round(z.hitFlash*10))+202*Math.min(3,Math.round(z.swingT*10)))}}
   const B=[];for(const b of G.bullets){const dx=b.x-cx,dy=b.y-cy;if(dx*dx+dy*dy<1000*1000)B.push([b.owner.id,Math.round(b.x),Math.round(b.y),Math.round(b.vx),Math.round(b.vy),Math.round(b.r*10),b.expl?1:0])}
   let O;if(c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
+  let M;if(c.n%4===3||c.n<3)M=DYN.map(r=>r.x<0?0:Math.max(1,Math.ceil(r.hp)));
   const D=[];for(const d of G.deploys){const dx=d.x-cx,dy=d.y-cy;if(dx*dx+dy*dy>1100*1100)continue;
     const o={};for(const k in d){const v=d[k];if(k==='owner')o.oid=v.id;else if(typeof v==='number')o[k]=q2(v);else if(typeof v==='string'||typeof v==='boolean')o[k]=v}D.push(o)}
   const E=[];const from=Math.max(0,c.evi-NET.evBase);
@@ -269,7 +270,7 @@ function netSnapFor(c){
     if(e.only&&e.only.indexOf(f.id)<0)continue;
     if(!e.all&&(e.x-cx)*(e.x-cx)+(e.y-cy)*(e.y-cy)>1500*1500)continue;E.push(e)}
   c.evi=NET.evBase+NET.ev.length;
-  return{k:'s',T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
+  return{k:'s',T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,M,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
 }
 function netHostTick(dt){
   if(!NET.live)return;
@@ -295,7 +296,7 @@ function netApplyDrop(d){
   G.fighters=fs;NET.zm.clear();
   fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
-  G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
+  mapReset();G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
   G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
   SFX.drop();G.mode='count';G.countdown=3.2;hide();showHUD(true);
 }
@@ -348,9 +349,15 @@ function netApplySnap(d){
   // bullets / orbs / deploys
   const lag=NET.lag;
   G.bullets=d.B.map(t=>({x:t[1]+t[3]*lag,y:t[2]+t[4]*lag,vx:t[3],vy:t[4],r:t[5]/10,expl:t[6]?1:0,owner:fs[t[0]]||fs[0],fx:{}}));
+  if(d.M)netMapApply(d.M);
   if(d.O)G.orbs=d.O.map(t=>({x:t[0],y:t[1],t:t[2],item:ITM[t[3]]}));
   G.deploys=d.D.map(o=>{o.owner=fs[o.oid]||fs[0];return o});
   for(const e of d.E)netReplay(e);
+}
+function netMapApply(M){
+  for(let i=0;i<DYN.length&&i<M.length;i++){const r=DYN[i],v=M[i];
+    if(v===0){if(r.x>=0){dynPark(r);if(r.door){r.on=false;r.broken=true}else r.gone=true}}
+    else{if(r.x<0){r.x=r.ox;r.y=r.oy}if(r.door)r.on=true;r.hp=v}}
 }
 function netMkZ(id,kc){
   const k=ZKS[kc]||'walker',z=makeFighter(id,'pistol');
@@ -398,6 +405,7 @@ function netClientUpdate(dt){
   }
   for(const b of G.bullets){b.x+=b.vx*dt;b.y+=b.vy*dt}
   for(const o of G.orbs)o.t+=dt;
+  mapDecay(dt);
   if(G.bo)G.bo.t-=dt;
   if(G.mode==='ending')return;
   // own fighter: input, prediction
