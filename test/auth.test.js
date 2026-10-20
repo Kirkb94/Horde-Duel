@@ -64,6 +64,66 @@ test('a held last player keeps the room until the hold expires', { timeout: 3000
   assert.equal((await srv.stats()).matches, 0);
 });
 
+test('host disconnect promotes the remaining player to host', { timeout: 30000 }, async t => {
+  const srv = await setup(t);
+  const { host, guest, hj, gj } = await startedRoom(srv);
+  await host.close();
+  const m = await guest.waitFor('players', 3000, x => x.host === gj.pid && x.players.length === 1);
+  assert.equal(m.host, gj.pid);
+  assert.notEqual(m.host, hj.pid);
+});
+
+test('a held host reclaims host when they rejoin', { timeout: 30000 }, async t => {
+  const srv = await setup(t);
+  const { host, guest, code, hj, gj } = await startedRoom(srv);
+  await host.close();
+  await guest.waitFor('players', 3000, x => x.host === gj.pid && x.players.length === 1);
+  guest.queue.length = 0;
+  const h2 = await connect(srv);
+  h2.send({ t: 'rejoin', code, token: hj.token });
+  const j = await h2.waitFor('joined', 3000);
+  assert.equal(j.rejoined, true);
+  assert.equal(j.pid, hj.pid);
+  assert.equal(j.host, hj.pid);
+  const m = await guest.waitFor('players', 3000, x => x.host === hj.pid && x.players.length === 2);
+  assert.equal(m.host, hj.pid);
+});
+
+test('after the host hold expires the interim host keeps host and the old host cannot rejoin', { timeout: 30000 }, async t => {
+  const srv = await setup(t);
+  const { host, guest, code, hj, gj } = await startedRoom(srv);
+  await host.close();
+  await guest.waitFor('players', 3000, x => x.host === gj.pid && x.players.length === 1);
+  await sleep(HOLD_MS + 700);
+  const h2 = await connect(srv);
+  h2.send({ t: 'rejoin', code, token: hj.token });
+  const e = await h2.waitFor('err', 3000);
+  assert.equal(e.rejoin, false);
+  guest.queue.length = 0;
+  guest.send({ t: 'upd', weapon: 'rifle' });   // forces a players broadcast
+  const m = await guest.waitFor('players', 3000);
+  assert.equal(m.host, gj.pid);
+});
+
+test('everyone drops: first back becomes host, the held host then reclaims it', { timeout: 30000 }, async t => {
+  const srv = await setup(t);
+  const { host, guest, code, hj, gj } = await startedRoom(srv);
+  await host.close();
+  await guest.close();
+  await until(async () => (await srv.stats()).players === 0, 3000, 'both players to drop');
+  const g2 = await connect(srv);
+  g2.send({ t: 'rejoin', code, token: gj.token });
+  const jg = await g2.waitFor('joined', 3000);
+  assert.equal(jg.host, gj.pid, 'first player back takes host while the host slot is empty');
+  g2.queue.length = 0;
+  const h2 = await connect(srv);
+  h2.send({ t: 'rejoin', code, token: hj.token });
+  const jh = await h2.waitFor('joined', 3000);
+  assert.equal(jh.host, hj.pid);
+  const m = await g2.waitFor('players', 3000, x => x.host === hj.pid && x.players.length === 2);
+  assert.equal(m.host, hj.pid);
+});
+
 test('rejoin with a wrong token is refused', { timeout: 30000 }, async t => {
   const srv = await setup(t);
   const { guest, code } = await startedRoom(srv);

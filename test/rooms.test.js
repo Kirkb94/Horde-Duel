@@ -72,6 +72,45 @@ test('cannot join a match that already started', async t => {
   assert.match((await g.waitFor('err')).msg, /already started/);
 });
 
+test('quick skips started and full rooms and makes a new lobby', async t => {
+  const srv = await setup(t);
+  const a = await makeRoom(srv, 'A');
+  a.host.send({ t: 'start' });
+  await a.host.waitFor('players', 3000, m => m.started === true);
+  const b = await makeRoom(srv, 'B');
+  b.host.send({ t: 'cfg', mode: 'duel', size: 2 });
+  await b.host.waitFor('players', 3000, m => m.cfg.mode === 'duel');
+  const g = await connect(srv);
+  g.send({ t: 'join', code: b.joined.code });
+  await g.waitFor('joined');
+  const q = await connect(srv);
+  q.send({ t: 'quick', name: 'Quick' });
+  const qj = await q.waitFor('joined');
+  assert.notEqual(qj.code, a.joined.code);
+  assert.notEqual(qj.code, b.joined.code);
+  assert.equal((await srv.stats()).rooms, 3);
+});
+
+test('quick joins an open lobby instead of creating another', async t => {
+  const srv = await setup(t);
+  const { joined } = await makeRoom(srv);
+  const q = await connect(srv);
+  q.send({ t: 'quick', name: 'Quick' });
+  assert.equal((await q.waitFor('joined')).code, joined.code);
+  assert.equal((await srv.stats()).rooms, 1);
+});
+
+test('auth: quick refuses to create a lobby when the match cap is reached', async t => {
+  const srv = await setup(t, { MODE: 'auth', MAX_MATCHES: '1' });
+  const { host } = await makeRoom(srv);
+  host.send({ t: 'start' });
+  await host.waitFor('players', 8000, m => m.started === true);
+  const q = await connect(srv);
+  q.send({ t: 'quick', name: 'Quick' });
+  assert.match((await q.waitFor('err', 5000)).msg, /as many matches/);
+  assert.equal((await srv.stats()).rooms, 1);
+});
+
 test('relay: host leaving closes the room for everyone', async t => {
   const srv = await setup(t);
   const { host, joined } = await makeRoom(srv);

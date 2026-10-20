@@ -51,6 +51,7 @@ const MAX_MATCHES = +(process.env.MAX_MATCHES || (MODE === 'auth' ? 4 : 60));   
 let PAGE = null;
 const loadGame = () => { if (!PAGE) PAGE = loadPage(fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')); return PAGE; };
 const perf = { ticks: 0, ms: 0, max: 0, errors: 0, aborts: 0 };
+const dropStats = { total: 0, rate: 0, client: 0, room: 0 };   // dropped inbound messages by reason (shown on /stats)
 const SIM_MAX_CONSEC = +(process.env.SIM_MAX_CONSEC || 5);    // consecutive failed ticks before the match is ended
 const SIM_MAX_TOTAL = +(process.env.SIM_MAX_TOTAL || 30);     // total failed ticks in one match before it is ended
 const PUBLIC = path.resolve(process.env.PUBLIC_DIR || path.join(__dirname, 'public'));
@@ -63,7 +64,8 @@ const server = http.createServer((req, res) => {
   if (url === '/stats') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ mode: MODE, rooms: rooms.size, matches: [...rooms.values()].filter(r => r.sim).length, players: [...rooms.values()].reduce((n, r) => n + r.players.size, 0),
-      tickMsAvg: perf.ticks ? +(perf.ms / perf.ticks).toFixed(2) : 0, tickMsMax: +perf.max.toFixed(1), simErrors: perf.errors, simAborts: perf.aborts }));
+      tickMsAvg: perf.ticks ? +(perf.ms / perf.ticks).toFixed(2) : 0, tickMsMax: +perf.max.toFixed(1), simErrors: perf.errors, simAborts: perf.aborts,
+      dropped: Object.assign({}, dropStats, { roomsThrottled: [...rooms.values()].filter(r => r.dropped > 0).length }) }));
   }
   if (process.env.DEBUG_HOOKS === '1' && url.startsWith('/debug/')) {   // test helpers, never enabled in production
     const [, , cmd, code] = url.split('/'); const r = rooms.get(code);
@@ -190,6 +192,26 @@ const JOIN_PER_10S = +(process.env.JOIN_PER_10S || 15);       // join / quick / 
 const MAX_LOBBY_BYTES = 2048;
 const MAX_GAME_BYTES = 4096;                                   // auth mode only; relay snapshots can be large
 const MAX_DROPS = 3000;                                        // drop count after which a connection is terminated
+// Inbound byte budgets (1s fixed windows). A client over its own cap is dropped before it is charged to the room,
+// so a noisy client exhausts only its own allowance; the room cap bounds the total.
+const CLIENT_BYTES_PER_SEC = envMs('CLIENT_BYTES_PER_SEC', 24 * 1024);
+const HOST_BYTES_PER_SEC = envMs('HOST_BYTES_PER_SEC', 3 * 1024 * 1024);   // relay-mode host uploads snapshots for everyone
+const ROOM_BYTES_PER_SEC = envMs('ROOM_BYTES_PER_SEC', MODE === 'auth' ? 256 * 1024 : 3 * 1024 * 1024);
+// Returns '' if the message fits the budgets, else 'client' or 'room'.
+function byteBudget(ws, len, now) {
+  const room = ws.room, p = ws.p;
+  const isRelayHost = MODE === 'relay' && room && p && p.pid === room.host;
+  const cap = isRelayHost ? HOST_BYTES_PER_SEC : CLIENT_BYTES_PER_SEC;
+  if (now - (ws.bWin || 0) >= 1000) { ws.bWin = now; ws.bBytes = 0; }
+  if ((ws.bBytes || 0) + len > cap) return 'client';
+  if (room) {
+    if (now - (room.bWin || 0) >= 1000) { room.bWin = now; room.bBytes = 0; }
+    if ((room.bBytes || 0) + len > ROOM_BYTES_PER_SEC) return 'room';
+    room.bBytes = (room.bBytes || 0) + len;
+  }
+  ws.bBytes = (ws.bBytes || 0) + len;
+  return '';
+}
 function msgAllowed(ws, t, len) {
   const now = Date.now();
   let ok = true;
@@ -209,12 +231,20 @@ function msgAllowed(ws, t, len) {
       }
     }
   }
+  let why = ok ? '' : 'rate';
+  if (ok) { why = byteBudget(ws, len, now); ok = !why; }
+  if (!ok) {
+    dropStats.total++; dropStats[why]++;
+    if (ws.room) ws.room.dropped = (ws.room.dropped || 0) + 1;
+  }
   if (!ok && ++ws.drops > MAX_DROPS) { try { ws.terminate(); } catch (e) {} }
   return ok;
 }
 
 // Auth mode: rebuild a client's game payload from a whitelist before it reaches the simulation.
 const ACT_KEYS = ['a', 'd', 'h', 'm', 'r', 'u', 'z'];
+const RELAY_HOST_KINDS = ['s', 'start', 'res', 'drop'];   // relay mode: the only message kinds the host may send to peers
+const RELAY_MAX_HOST = 200000;                          // max serialized size of one host relay message (chars)
 const numIn = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
 function cleanGameMsg(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
@@ -258,10 +288,13 @@ function clearHolds(room) {
   if (!room.held) return;
   for (const h of room.held.values()) clearTimeout(h.timer);
   room.held.clear();
+  room.heldHost = 0;
 }
 function expireHold(room, token) {
-  if (!room.held.has(token)) return;
+  const h = room.held.get(token);
+  if (!h) return;
   room.held.delete(token);
+  if (room.heldHost === h.p.pid) room.heldHost = 0;
   if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); }
 }
 function abortMatch(room, why) {
@@ -312,14 +345,25 @@ function startSim(room, diff) {
 }
 const roomCap = room => room.cfg.mode === 'duel' ? 2 : room.cfg.mode === 'team' ? 4 : room.cfg.size;
 const newCfg = () => ({ mode: 'br', size: 16, map: 'random' });
+function balanceTeams(room) {
+  if (room.started || room.cfg.mode !== 'team') return;
+  const ps = [...room.players.values()];
+  for (const q of ps) q.team = q.team === 1 ? 1 : 0;
+  const a = ps.filter(q => q.team === 0), b = ps.filter(q => q.team === 1);
+  while (a.length > 2 && b.length < 2) { const q = a.pop(); q.team = 1; b.push(q); }
+  while (b.length > 2 && a.length < 2) { const q = b.pop(); q.team = 0; a.push(q); }
+}
 const list = room => [...room.players.values()].map(p => ({ pid: p.pid, name: p.name, weapon: p.weapon, team: p.team }));
 function bcastPlayers(room) {
   const msg = { t: 'players', host: room.host, players: list(room), started: room.started, cfg: room.cfg };
   for (const p of room.players.values()) send(p.ws, msg);
 }
+// Returns an error message if the room can't accept a new player right now, else null.
+const joinBlock = room => room.players.size >= roomCap(room) ? 'That room is full.' : room.started ? 'That match already started.' : null;
+const activeMatches = () => [...rooms.values()].filter(r => r.sim).length;
 function joinRoom(ws, room, name, weapon) {
-  if (room.players.size >= roomCap(room)) return send(ws, { t: 'err', msg: 'That room is full.' });
-  if (room.started) return send(ws, { t: 'err', msg: 'That match already started.' });
+  const block = joinBlock(room);
+  if (block) return send(ws, { t: 'err', msg: block });
   leaveRoom(ws);
   const nA = [...room.players.values()].filter(q => q.team === 0).length, nB = room.players.size - nA;
   const p = { ws, token: newToken(), pid: nextPid++, name: uniqueName(room, name), weapon: WEAPONS.includes(weapon) ? weapon : 'rifle', team: nA <= nB ? 0 : 1 };
@@ -340,7 +384,11 @@ function leaveRoom(ws, hold) {
     if (room.sim) { try { room.sim.api.botify(p.pid); if (!room.sim.api.humans() && !held && !room.held.size) { stopSim(room); room.started = false; } } catch (e) {} }
     if (held) room.held.set(p.token, { p, timer: setTimeout(() => expireHold(room, p.token), HOLD_MS) });
     if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); return; }
-    if (p.pid === room.host && room.players.size) room.host = room.players.keys().next().value;
+    if (p.pid === room.host) {
+      if (held) room.heldHost = p.pid;   // remember a held host so they can reclaim it on rejoin
+      room.host = room.players.size ? room.players.keys().next().value : 0;
+    }
+    balanceTeams(room);
     bcastPlayers(room); return;
   }
   if (p.pid === room.host) {
@@ -350,7 +398,7 @@ function leaveRoom(ws, hold) {
   }
   const h = room.players.get(room.host);
   if (h) send(h.ws, { t: 'left', pid: p.pid });
-  if (!room.players.size) rooms.delete(room.code); else bcastPlayers(room);
+  if (!room.players.size) rooms.delete(room.code); else { balanceTeams(room); bcastPlayers(room); }
 }
 
 wss.on('connection', (ws, req) => {
@@ -392,29 +440,37 @@ wss.on('connection', (ws, req) => {
       }
       case 'quick': {
         let best = null;
-        for (const r of rooms.values()) if (!r.started && r.players.size < roomCap(r) && (!best || r.players.size > best.players.size)) best = r;
+        for (const r of rooms.values()) if (!joinBlock(r) && (!best || r.players.size > best.players.size)) best = r;
         if (!best) {
           if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
+          if (MODE === 'auth' && activeMatches() >= MAX_MATCHES) return send(ws, { t: 'err', msg: 'The server is running as many matches as it can. Try again shortly.' });
           if (roomLimited(ws)) return;
-          const code = newCode(); best = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() }; rooms.set(code, best);
+          const code = newCode(); if (!code) return send(ws, { t: 'err', msg: 'No room codes free.' });
+          best = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() }; rooms.set(code, best);
         }
         return joinRoom(ws, best, m.name, m.weapon);
       }
       case 'cfg': {
         if (!room || !p || p.pid !== room.host || room.started) return;
-        const mode = ['br', 'duel', 'team'].includes(m.mode) ? m.mode : 'br';
-        let size = Math.max(2, Math.min(MAX_PLAYERS, Math.round(+m.size) || 16));
+        if (m.mode !== undefined && !(typeof m.mode === 'string' && ['br', 'duel', 'team'].includes(m.mode))) return send(ws, { t: 'err', msg: 'Invalid game mode.' });
+        if (m.map !== undefined && !(typeof m.map === 'string' && ['random', 'hotel', 'camp', 'hospital'].includes(m.map))) return send(ws, { t: 'err', msg: 'Invalid map.' });
+        if (m.size !== undefined && !(typeof m.size === 'number' && isFinite(m.size))) return send(ws, { t: 'err', msg: 'Invalid room size.' });
+        const mode = m.mode !== undefined ? m.mode : room.cfg.mode;
+        let size = Math.max(2, Math.min(MAX_PLAYERS, Math.round(m.size !== undefined ? m.size : room.cfg.size) || 16));
         const cap = mode === 'duel' ? 2 : mode === 'team' ? 4 : size;
         if (mode === 'br') size = Math.max(size, room.players.size);
         else if (room.players.size > cap) return send(ws, { t: 'err', msg: 'Too many players in the room for ' + (mode === 'duel' ? '1v1' : '2v2') + '.' });
-        const map = ['random', 'hotel', 'camp', 'hospital'].includes(m.map) ? m.map : 'random';
+        const map = m.map !== undefined ? m.map : room.cfg.map;
         room.cfg = { mode, size, map };
-        if (mode === 'team') { let a = 0, b = 0; for (const q of room.players.values()) { if (q.team === 1) b++; else a++; } for (const q of room.players.values()) { if (q.team === 1 && b > 2) { q.team = 0; b--; a++; } else if (q.team !== 1 && a > 2) { q.team = 1; a--; b++; } } }
+        balanceTeams(room);
         return bcastPlayers(room);
       }
       case 'upd': {
         if (!room || !p) return;
         if (room.started) return;                      // roster is locked once the match is running
+        if (m.name !== undefined && typeof m.name !== 'string') return send(ws, { t: 'err', msg: 'Invalid name.' });
+        if (m.weapon !== undefined && typeof m.weapon !== 'string') return send(ws, { t: 'err', msg: 'Invalid weapon.' });
+        if (m.team !== undefined && m.team !== 0 && m.team !== 1) return send(ws, { t: 'err', msg: 'Invalid team.' });
         if (m.team === 0 || m.team === 1) { const n = [...room.players.values()].filter(q => q !== p && q.team === m.team).length; if (room.cfg.mode !== 'team' || n < 2) p.team = m.team; else send(ws, { t: 'err', msg: 'That team is full.' }); }
         if (typeof m.name === 'string') p.name = uniqueName({ players: new Map([...room.players].filter(([k]) => k !== p.pid)) }, m.name);
         if (WEAPONS.includes(m.weapon)) p.weapon = m.weapon;
@@ -455,7 +511,7 @@ wss.on('connection', (ws, req) => {
         if (old && old !== ws) { old.p = null; old.room = null; send(old, { t: 'closed', reason: 'You reconnected to this match from another connection.' }); try { old.close(1000, 'replaced'); } catch (e) {} }
         q.ws = ws; ws.p = q; ws.room = r; ws.rjFails = 0;
         r.players.set(q.pid, q);
-        if (!r.players.has(r.host)) r.host = q.pid;
+        if (r.heldHost === q.pid || !r.players.has(r.host)) { r.host = q.pid; if (r.heldHost === q.pid) r.heldHost = 0; }
         send(ws, { t: 'joined', token: q.token, auth: r.auth, cfg: r.cfg, code: r.code, pid: q.pid, host: r.host, players: list(r), started: r.started, rejoined: true });
         try { if (typeof r.sim.api.resync === 'function') r.sim.api.resync(q.pid); } catch (e) { console.error('resync failed', e); }
         return bcastPlayers(r);
@@ -464,13 +520,21 @@ wss.on('connection', (ws, req) => {
       case 'r': {                                      // relay: client -> host, host -> peer or everyone
         if (!room || !p) return;
         if (room.auth) { if (room.sim) { const d = cleanGameMsg(m.d); if (d) { try { room.sim.api.recv(p.pid, d); } catch (e) {} } } return; }
+        const d0 = m.d;
+        if (!d0 || typeof d0 !== 'object' || Array.isArray(d0) || typeof d0.k !== 'string') return;
         if (p.pid === room.host) {
-          if (m.to === '*') { const out = JSON.stringify({ t: 'r', from: p.pid, d: m.d }); for (const q of room.players.values()) if (q !== p) relaySend(q, out, m.d); }
-          else { const q = room.players.get(m.to); if (q && q.ws.readyState === 1) {
-            if (slowCheck(q.ws) || (m.d && m.d.k === 's' && q.ws.bufferedAmount > SLOW_BUF)) return;   // drop stale snapshots for slow links, kill hopeless sockets
-            q.ws.send(JSON.stringify({ t: 'r', from: p.pid, d: m.d })); } }
+          if (!RELAY_HOST_KINDS.includes(d0.k)) return;
+          if (m.to !== '*' && !Number.isInteger(m.to)) return;
+          const out = JSON.stringify({ t: 'r', from: p.pid, d: d0 });
+          if (out.length > RELAY_MAX_HOST) return;
+          if (m.to === '*') { for (const q of room.players.values()) if (q !== p) relaySend(q, out, d0); }
+          else { const q = room.players.get(m.to); if (q && q !== p && q.ws.readyState === 1) {
+            if (slowCheck(q.ws) || (d0.k === 's' && q.ws.bufferedAmount > SLOW_BUF)) return;   // drop stale snapshots for slow links, kill hopeless sockets
+            q.ws.send(out); } }
         } else {
-          const h = room.players.get(room.host); if (h && h.ws.readyState === 1) h.ws.send(JSON.stringify({ t: 'r', from: p.pid, d: m.d }));
+          const d = cleanGameMsg(d0);   // peers may only send input ('i') or 'ready'; payload rebuilt from a whitelist
+          if (!d) return;
+          const h = room.players.get(room.host); if (h && h.ws.readyState === 1) h.ws.send(JSON.stringify({ t: 'r', from: p.pid, d }));
         }
         return;
       }
