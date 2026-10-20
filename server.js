@@ -21,7 +21,9 @@ const MAX_ROOMS = +(process.env.MAX_ROOMS || 60);
 const MAX_MATCHES = +(process.env.MAX_MATCHES || (MODE === 'auth' ? 4 : 60));   // simultaneous server-run matches
 let PAGE = null;
 const loadGame = () => { if (!PAGE) PAGE = loadPage(fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')); return PAGE; };
-const perf = { ticks: 0, ms: 0, max: 0 };
+const perf = { ticks: 0, ms: 0, max: 0, errors: 0, aborts: 0 };
+const SIM_MAX_CONSEC = +(process.env.SIM_MAX_CONSEC || 5);    // consecutive failed ticks before the match is ended
+const SIM_MAX_TOTAL = +(process.env.SIM_MAX_TOTAL || 30);     // total failed ticks in one match before it is ended
 const PUBLIC = process.env.PUBLIC_DIR || path.join(__dirname, 'public');
 const WEAPONS = ['pistol', 'revolver', 'smg', 'rifle', 'shotgun', 'rocket', 'sword', 'sniper', 'crossbow', 'carbine', 'scorch'];
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -32,7 +34,7 @@ const server = http.createServer((req, res) => {
   if (url === '/stats') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ mode: MODE, rooms: rooms.size, matches: [...rooms.values()].filter(r => r.sim).length, players: [...rooms.values()].reduce((n, r) => n + r.players.size, 0),
-      tickMsAvg: perf.ticks ? +(perf.ms / perf.ticks).toFixed(2) : 0, tickMsMax: +perf.max.toFixed(1) }));
+      tickMsAvg: perf.ticks ? +(perf.ms / perf.ticks).toFixed(2) : 0, tickMsMax: +perf.max.toFixed(1), simErrors: perf.errors, simAborts: perf.aborts }));
   }
   if (process.env.DEBUG_HOOKS === '1' && url.startsWith('/debug/')) {   // test helpers, never enabled in production
     const [, , cmd, code] = url.split('/'); const r = rooms.get(code);
@@ -57,6 +59,31 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 256 * 1024, p
 
 const rooms = new Map();   // code -> room
 let nextPid = 1;
+
+// Per-IP abuse limits (override with env vars). Loopback is exempt for local testing.
+const MAX_CONN_PER_IP = +(process.env.MAX_CONN_PER_IP || 8);
+const ROOMS_PER_MIN = +(process.env.ROOMS_PER_MIN || 6);
+const XFF_HOPS = +(process.env.XFF_HOPS || 0);   // 0 = trust first X-Forwarded-For entry; N = take Nth entry from the right (strict, set to your trusted proxy count)
+const ipConns = new Map();   // ip -> open socket count
+const ipRooms = new Map();   // ip -> timestamps of recent room creations
+function clientIp(req) {
+  const xff = String((req.headers && req.headers['x-forwarded-for']) || '').split(',').map(s => s.trim()).filter(Boolean);
+  let ip = xff.length ? (XFF_HOPS > 0 ? xff[Math.max(0, xff.length - XFF_HOPS)] : xff[0]) : (req.socket && req.socket.remoteAddress) || 'unknown';
+  return String(ip).replace(/^::ffff:/, '').slice(0, 64);
+}
+const isLocalIp = ip => ip === '127.0.0.1' || ip === '::1' || ip === 'unknown';
+function roomLimited(ws) {
+  if (isLocalIp(ws.ip)) return false;
+  const now = Date.now(), arr = (ipRooms.get(ws.ip) || []).filter(t => now - t < 60000);
+  if (arr.length >= ROOMS_PER_MIN) {
+    ipRooms.set(ws.ip, arr);
+    const wait = Math.max(1, Math.ceil((60000 - (now - arr[0])) / 1000));
+    send(ws, { t: 'err', msg: "You're creating rooms too quickly. Try again in " + wait + 's.' });
+    return true;
+  }
+  arr.push(now); ipRooms.set(ws.ip, arr);
+  return false;
+}
 
 const clean = (s, n) => String(s == null ? '' : s).replace(/[^\w \-.!?]/g, '').trim().slice(0, n);
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
@@ -88,6 +115,16 @@ function expireHold(room, token) {
   room.held.delete(token);
   if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); }
 }
+function abortMatch(room, why) {
+  perf.aborts++;
+  console.error('ending match in room ' + room.code + ': ' + why);
+  clearHolds(room);
+  stopSim(room);
+  room.started = false;
+  if (!room.players.size) { rooms.delete(room.code); return; }
+  bcastPlayers(room);   // started=false sends clients back to the lobby
+  for (const p of room.players.values()) send(p.ws, { t: 'err', msg: "The match hit a server error and was ended. You're back in the lobby." });
+}
 function startSim(room, diff) {
   clearHolds(room);
   const players = [...room.players.values()].map(p => ({ pid: p.pid, name: p.name, weapon: p.weapon, team: p.team }));
@@ -103,12 +140,18 @@ function startSim(room, diff) {
   room.sim = createSim(loadGame(), io);
   room.sim.api.start(players, diff, room.cfg);
   let last = process.hrtime.bigint();
+  let fails = 0, totalFails = 0;
   const step = 1000 / TICK_HZ;
   const loop = () => {
     if (!room.sim) return;
     const t0 = process.hrtime.bigint();
     const dt = Math.min(0.05, Number(t0 - last) / 1e9); last = t0;
-    try { room.sim.api.tick(dt); } catch (e) { console.error('sim error', e); }
+    try { room.sim.api.tick(dt); fails = 0; }
+    catch (e) {
+      fails++; totalFails++; perf.errors++;
+      console.error('sim error (room ' + room.code + ', ' + fails + ' in a row, ' + totalFails + ' total)', e);
+      if (fails >= SIM_MAX_CONSEC || totalFails >= SIM_MAX_TOTAL) return abortMatch(room, 'repeated sim tick errors');
+    }
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     perf.ticks++; perf.ms += ms; if (ms > perf.max) perf.max = ms;
     if (perf.ticks > 6000) { perf.ticks = 1500; perf.ms = perf.ms / 4; perf.max = ms; }
@@ -159,6 +202,15 @@ function leaveRoom(ws, hold) {
 }
 
 wss.on('connection', (ws, req) => {
+  ws.ip = clientIp(req);
+  const nConn = (ipConns.get(ws.ip) || 0) + 1;
+  if (!isLocalIp(ws.ip) && nConn > MAX_CONN_PER_IP) {
+    ws.on('error', () => {});
+    try { ws.send(JSON.stringify({ t: 'err', msg: 'Too many connections from your network. Close other Horde Duel tabs and try again.' })); } catch (e) {}
+    ws.close(1013, 'Too many connections');
+    return;
+  }
+  ipConns.set(ws.ip, nConn);
   ws.isAlive = true; ws.msgs = 0; ws.room = null; ws.p = null;
   ws.on('pong', () => { ws.isAlive = true; });
   const rate = setInterval(() => { ws.msgs = 0; }, 1000);
@@ -171,6 +223,7 @@ wss.on('connection', (ws, req) => {
       case 'ping': return send(ws, { t: 'pong', ts: m.ts });
       case 'create': {
         if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
+        if (roomLimited(ws)) return;
         const code = newCode(); if (!code) return send(ws, { t: 'err', msg: 'No room codes free.' });
         const r = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() };
         rooms.set(code, r); return joinRoom(ws, r, m.name, m.weapon);
@@ -185,6 +238,7 @@ wss.on('connection', (ws, req) => {
         for (const r of rooms.values()) if (!r.started && r.players.size < roomCap(r) && (!best || r.players.size > best.players.size)) best = r;
         if (!best) {
           if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
+          if (roomLimited(ws)) return;
           const code = newCode(); best = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() }; rooms.set(code, best);
         }
         return joinRoom(ws, best, m.name, m.weapon);
@@ -257,14 +311,42 @@ wss.on('connection', (ws, req) => {
       }
     }
   });
-  ws.on('close', () => { clearInterval(rate); leaveRoom(ws, true); });
+  ws.on('close', () => {
+    clearInterval(rate); leaveRoom(ws, true);
+    const n = (ipConns.get(ws.ip) || 1) - 1; if (n > 0) ipConns.set(ws.ip, n); else ipConns.delete(ws.ip);
+  });
   ws.on('error', () => {});
 });
 
-setInterval(() => {
+const sweeper = setInterval(() => {
   for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch (e) {} }
   const now = Date.now();                              // sweep empty / abandoned lobbies
+  for (const [ip, arr] of ipRooms) { const keep = arr.filter(t => now - t < 60000); if (keep.length) ipRooms.set(ip, keep); else ipRooms.delete(ip); }
   for (const [c, r] of rooms) if ((!r.players.size && !(r.held && r.held.size)) || (!r.started && now - r.created > 6 * 3600e3)) { clearHolds(r); stopSim(r); rooms.delete(c); }
 }, 10000);
 
 server.listen(PORT, () => console.log('Horde Duel server listening on :' + PORT + ' mode=' + MODE));
+
+// Graceful shutdown (Render sends SIGTERM on every deploy/restart)
+let shuttingDown = false;
+function shutdown(sig) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(sig + ' received, shutting down');
+  const force = setTimeout(() => { console.error('shutdown timed out, forcing exit'); process.exit(1); }, 5000);
+  clearInterval(sweeper);
+  server.close(() => { clearTimeout(force); console.log('shutdown complete'); process.exit(0); });   // stop accepting new HTTP / WS upgrades
+  for (const room of rooms.values()) { clearHolds(room); stopSim(room); }
+  rooms.clear();
+  const msg = JSON.stringify({ t: 'closed', reason: 'The server is restarting for an update. Please start a new room in a moment.' });
+  for (const ws of wss.clients) {
+    ws.room = null; ws.p = null;                       // so the close handler doesn't start rejoin holds
+    try { if (ws.readyState === 1) ws.send(msg); ws.close(1001, 'server restarting'); } catch (e) { try { ws.terminate(); } catch (_) {} }
+  }
+  setTimeout(() => { for (const ws of wss.clients) { try { ws.terminate(); } catch (e) {} } }, 1500);   // clients that don't finish the close handshake
+  wss.close();
+  if (server.closeIdleConnections) server.closeIdleConnections();
+  setTimeout(() => { if (server.closeAllConnections) server.closeAllConnections(); }, 2000);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
