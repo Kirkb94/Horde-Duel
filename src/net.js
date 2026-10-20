@@ -165,6 +165,13 @@ function netSrvStart(pl,diff,cfg){
   netRel('*',{k:'start',ros:netRoster(),cfg:G.cfg,diff:G.diff,drop:netDropInfo()});
 }
 function netHumans(){return Object.keys(NET.cl).length}
+function netRejoin(pid){
+  if(NET.cl[pid])return true;
+  const f=G.fighters.slice(0,N_FIGHT).find(x=>x.pid===pid);if(!f)return false;
+  f.isAI=false;f.remote=true;f.pend=0;f.wantFire=false;
+  NET.cl[pid]={f,evi:NET.evBase+NET.ev.length,sv:f.id};
+  feedAdd(f.name+' reconnected',false);return true;
+}
 function netBotify(pid){
   const c=NET.cl[pid];if(!c)return;
   c.f.remote=false;c.f.isAI=true;c.f.wantFire=false;delete NET.cl[pid];delete NET.inp[pid];delete NET.ready[pid];

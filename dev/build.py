@@ -38,7 +38,7 @@ css=""".nin{width:100%;box-sizing:border-box;background:var(--void);color:var(--
 i=src.index("</style>");src=src[:i]+css+src[i+8:]
 net=open('src/net.js').read()
 mark="pfInit();resize();menu();requestAnimationFrame(frame);"
-rep(mark,net+"\nif(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,humans:netHumans,NET,G};}else{"+mark+"}")
+rep(mark,net+"\nif(window.__SIM){window.__SIM.api={start:netSrvStart,tick:update,recv:netRecv,botify:netBotify,rejoin:netRejoin,humans:netHumans,NET,G};}else{"+mark+"}")
 rep("<title>","<title>Online · ") if False else None
 import os
 if os.environ.get('TEST'):

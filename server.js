@@ -5,11 +5,14 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { loadPage, createSim } = require('./sim');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 16;
+const HOLD_MS = 30000;   // how long a disconnected player's slot is held for rejoin (auth mode)
+const newToken = () => crypto.randomBytes(16).toString('hex');
 // MODE=auth  : the server runs the match (recommended, needs a paid Render instance for CPU)
 // MODE=relay : the room creator's browser runs the match and the server only forwards messages (fine on the free plan)
 const MODE = process.env.MODE === 'relay' ? 'relay' : 'auth';
@@ -75,7 +78,18 @@ function stopSim(room) {
   if (room.timer) { clearTimeout(room.timer); room.timer = null; }
   if (room.sim) { try { room.sim.stop(); } catch (e) {} room.sim = null; }
 }
+function clearHolds(room) {
+  if (!room.held) return;
+  for (const h of room.held.values()) clearTimeout(h.timer);
+  room.held.clear();
+}
+function expireHold(room, token) {
+  if (!room.held.has(token)) return;
+  room.held.delete(token);
+  if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); }
+}
 function startSim(room, diff) {
+  clearHolds(room);
   const players = [...room.players.values()].map(p => ({ pid: p.pid, name: p.name, weapon: p.weapon, team: p.team }));
   const sendTo = (p, str) => { if (p && p.ws.readyState === 1) p.ws.send(str); };
   const io = {
@@ -114,22 +128,24 @@ function joinRoom(ws, room, name, weapon) {
   if (room.started) return send(ws, { t: 'err', msg: 'That match already started.' });
   leaveRoom(ws);
   const nA = [...room.players.values()].filter(q => q.team === 0).length, nB = room.players.size - nA;
-  const p = { ws, pid: nextPid++, name: uniqueName(room, name), weapon: WEAPONS.includes(weapon) ? weapon : 'rifle', team: nA <= nB ? 0 : 1 };
+  const p = { ws, token: newToken(), pid: nextPid++, name: uniqueName(room, name), weapon: WEAPONS.includes(weapon) ? weapon : 'rifle', team: nA <= nB ? 0 : 1 };
   ws.p = p; ws.room = room;
   room.players.set(p.pid, p);
   if (!room.host) room.host = p.pid;
-  send(ws, { t: 'joined', auth: room.auth, cfg: room.cfg, code: room.code, pid: p.pid, host: room.host, players: list(room), started: room.started });
+  send(ws, { t: 'joined', token: p.token, auth: room.auth, cfg: room.cfg, code: room.code, pid: p.pid, host: room.host, players: list(room), started: room.started });
   bcastPlayers(room);
 }
-function leaveRoom(ws) {
+function leaveRoom(ws, hold) {
   const room = ws.room, p = ws.p;
   if (!room || !p) return;
   room.players.delete(p.pid);
   ws.room = null; ws.p = null;
   if (room.auth) {
-    if (room.sim) { try { room.sim.api.botify(p.pid); if (!room.sim.api.humans()) { stopSim(room); room.started = false; } } catch (e) {} }
-    if (!room.players.size) { stopSim(room); rooms.delete(room.code); return; }
-    if (p.pid === room.host) room.host = room.players.keys().next().value;
+    const held = !!(hold && p.token && room.started && room.sim);
+    if (room.sim) { try { room.sim.api.botify(p.pid); if (!room.sim.api.humans() && !held && !room.held.size) { stopSim(room); room.started = false; } } catch (e) {} }
+    if (held) room.held.set(p.token, { p, timer: setTimeout(() => expireHold(room, p.token), HOLD_MS) });
+    if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); return; }
+    if (p.pid === room.host && room.players.size) room.host = room.players.keys().next().value;
     bcastPlayers(room); return;
   }
   if (p.pid === room.host) {
@@ -156,7 +172,7 @@ wss.on('connection', (ws, req) => {
       case 'create': {
         if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
         const code = newCode(); if (!code) return send(ws, { t: 'err', msg: 'No room codes free.' });
-        const r = { code, players: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() };
+        const r = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() };
         rooms.set(code, r); return joinRoom(ws, r, m.name, m.weapon);
       }
       case 'join': {
@@ -169,7 +185,7 @@ wss.on('connection', (ws, req) => {
         for (const r of rooms.values()) if (!r.started && r.players.size < roomCap(r) && (!best || r.players.size > best.players.size)) best = r;
         if (!best) {
           if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
-          const code = newCode(); best = { code, players: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() }; rooms.set(code, best);
+          const code = newCode(); best = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() }; rooms.set(code, best);
         }
         return joinRoom(ws, best, m.name, m.weapon);
       }
@@ -208,7 +224,26 @@ wss.on('connection', (ws, req) => {
           }
           bcastPlayers(room);
         } return;
-      case 'lobby': if (room && p && p.pid === room.host) { stopSim(room); room.started = false; bcastPlayers(room); } return;
+      case 'lobby': if (room && p && p.pid === room.host) { clearHolds(room); stopSim(room); room.started = false; bcastPlayers(room); } return;
+      case 'rejoin':
+        if (MODE === 'relay') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server" });
+        return;                                        // auth-mode rejoin: handled by the separate rejoin task
+      case 'rejoin': {
+        if (MODE !== 'auth') return send(ws, { t: 'err', msg: "Rejoin isn't available on this server." });
+        const r = rooms.get(clean(m.code, 4).toUpperCase());
+        const h = r && r.held && typeof m.token === 'string' ? r.held.get(m.token) : null;
+        if (!h || !r.sim) return send(ws, { t: 'err', msg: 'Could not rejoin: that slot is no longer held.', rejoin: false });
+        if (typeof r.sim.api.rejoin !== 'function') return send(ws, { t: 'err', msg: 'Rejoin is not supported by this build yet.', rejoin: false });
+        let ok = false; try { ok = !!r.sim.api.rejoin(h.p.pid); } catch (e) { console.error('rejoin failed', e); }
+        if (!ok) return send(ws, { t: 'err', msg: 'Could not rejoin the match.', rejoin: false });
+        if (ws.room) leaveRoom(ws);
+        clearTimeout(h.timer); r.held.delete(m.token);
+        const q = h.p; q.ws = ws; ws.p = q; ws.room = r;
+        r.players.set(q.pid, q);
+        if (!r.players.has(r.host)) r.host = q.pid;
+        send(ws, { t: 'joined', token: q.token, auth: r.auth, cfg: r.cfg, code: r.code, pid: q.pid, host: r.host, players: list(r), started: r.started, rejoined: true });
+        return bcastPlayers(r);
+      }
       case 'leave': return leaveRoom(ws);
       case 'r': {                                      // relay: client -> host, host -> peer or everyone
         if (!room || !p) return;
@@ -225,14 +260,14 @@ wss.on('connection', (ws, req) => {
       }
     }
   });
-  ws.on('close', () => { clearInterval(rate); leaveRoom(ws); });
+  ws.on('close', () => { clearInterval(rate); leaveRoom(ws, true); });
   ws.on('error', () => {});
 });
 
 setInterval(() => {
   for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } ws.isAlive = false; try { ws.ping(); } catch (e) {} }
   const now = Date.now();                              // sweep empty / abandoned lobbies
-  for (const [c, r] of rooms) if (!r.players.size || (!r.started && now - r.created > 6 * 3600e3)) { stopSim(r); rooms.delete(c); }
+  for (const [c, r] of rooms) if ((!r.players.size && !(r.held && r.held.size)) || (!r.started && now - r.created > 6 * 3600e3)) { clearHolds(r); stopSim(r); rooms.delete(c); }
 }, 10000);
 
 server.listen(PORT, () => console.log('Horde Duel server listening on :' + PORT + ' mode=' + MODE));

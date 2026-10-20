@@ -10,7 +10,9 @@ Up to 16 players per room on one Render web service. The service serves the game
 | If the creator leaves | Match continues, next player becomes room leader | Room closes |
 | Render plan | **Starter or higher** (about 10% of a core per match) | Free works |
 | Lag | One network hop, one clock, no weak host | Host's PC and upload limit everyone |
+| Rejoin after disconnect | Supported (auth only) | Not available: the server replies "Rejoin isn't available on this server" |
 
+Rejoin is auth-only because the server owns the match state and can hold a player's slot. In relay mode the host's browser owns it, so a dropped player has to join a new room.
 Players send inputs; the server sends each player a snapshot of what is near them 20 times a second.
 Your own movement is predicted locally so it stays responsive. In `auth` mode every fighter, bullet and zombie is simulated in one place, so nobody has a different picture of the match.
 
@@ -22,6 +24,9 @@ Your own movement is predicted locally so it stays responsive. In `auth` mode ev
 4. Pick a Render region close to your players.
 
 **Free plan:** the sim needs more CPU than the free instance offers, so use `MODE=relay` there. Free services also sleep after about 15 minutes idle (first player waits up to a minute).
+
+## Rejoin (auth mode only)
+If a player drops mid-match, `MODE=auth` keeps their slot for a short time so they can rejoin the same match with their session token. `MODE=relay` does not support rejoin: the match lives in the creator's browser, so the server has nothing to hand back. A relay server answers a rejoin attempt with "Rejoin isn't available on this server", and a dropped player has to start or join a new room.
 
 ## Settings (environment variables)
 - `MODE` = `auth` or `relay`
