@@ -21,7 +21,7 @@ rep("    case 'zombies':startZombies();break;","    case 'zombies':startZombies(
 rep("case 'spec':G.mode='play';hide();break;","case 'spec':if(!NET.m)G.mode='play';hide();break;")
 rep("    case 'pick':\n      if(v)applyUpgrade(G.P,v,+b.dataset.m||1);","    case 'pick':\n      if(NET.m==='client'){netClientPick(v,+b.dataset.m||1);break}\n      if(v)applyUpgrade(G.P,v,+b.dataset.m||1);")
 rep("if(G.pickCtx==='between'){for(const f of G.fighters)if(f.isAI)aiPick(f);G.dropNo++;startDrop()}","if(G.pickCtx==='between'){if(NET.m==='host'){netHostOwnPicked();break}for(const f of G.fighters)if(f.isAI)aiPick(f);G.dropNo++;startDrop()}")
-rep("function update(dt){\n  for(let i=G.fx.length-1","function update0(dt){\n  for(let i=G.fx.length-1")
+rep("function update(dt){\n  if((sticks.move||sticks.aim)&&!PLAT.pc&&!phoneUI())clearSticks();\n  for(let i=G.fx.length-1","function update0(dt){\n  if((sticks.move||sticks.aim)&&!PLAT.pc&&!phoneUI())clearSticks();\n  for(let i=G.fx.length-1")
 rep("  if(!G.P)return;\n  SFX.tick(dt);","  if(!G.P)return;\n  SFX.tick(dt);\n  if(NET.m==='client'){netClientUpdate(dt);return}")
 rep("if(f===P&&!G.debug)controlPlayer(dt);else if(f.zomb)controlHorde(f,dt);","if(f.remote)controlRemote(f,dt);else if(f===P&&!G.debug&&!NET.srv)controlPlayer(dt);else if(f.zomb)controlHorde(f,dt);")
 rep("if(t===G.P&&!G.debug){G.spectating=true","if(t===G.P&&!G.debug&&!NET.srv){G.spectating=true")
@@ -46,5 +46,7 @@ if os.environ.get('TEST'):
     open('/tmp/claude-0/t/test.html','w').write(src)
 else:
     src=src.replace('window.__G=G;','')
+    HEAD='<!doctype html>\n<html lang="en"><head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">\n<meta name="mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n<meta name="theme-color" content="#020403">\n'
+    src=HEAD+src
     open('/home/claude/mp/public/index.html','w').write(src)
 print('built',len(src))

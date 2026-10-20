@@ -3,7 +3,7 @@
 // filtered snapshots + events through the relay server. Solo play never touches any of this (NET.m === null).
 const NET={ws:null,role:null,m:null,live:false,pid:0,hostPid:0,code:'',players:[],name:'',notice:'',status:'',view:'',
   inp:{},ready:{},cl:{},my:0,rtt:0,ev:[],evBase:0,lastSend:0,lastIn:0,acts:[],resDn:-1,pk:0,tot:0,picks:[],zm:new Map(),
-  cfg:{mode:'br',size:16},lastSnap:0,gotSnap:false,lag:.05,pts:null,betT:0,paused:false,keyR:0,hpPrev:0,hurtT:0,waitEl:null};
+  cfg:{mode:'br',size:16,map:'random'},lastSnap:0,gotSnap:false,lag:.05,pts:null,betT:0,paused:false,keyR:0,hpPrev:0,hurtT:0,waitEl:null};
 try{NET.name=localStorage.getItem('hordename')||''}catch(e){}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const FK=['x','y','facing','hp','armor','vx','vy','dashT','jumpT','jx','jy','jtx','jty','jumpMax','swingT','swingSide','muzzle','reloadT','rdT','shield','shieldDir','shieldMax','cloakT','healT','healMax','burnT','slowT','markT','hitFlash','parryT','swordOut','defl','inv','stillT','shF','hurtT','healKind','down','downT','revP','finP','tagT','tagBy','zoom','litT','fenceT','fenceN','scanWarn'];
@@ -96,7 +96,7 @@ function netReadForm(){
   if(s){try{localStorage.setItem('hordeserver',s.value.trim())}catch(e){}}
 }
 function netCap(){const c=NET.cfg;return c.mode==='duel'?2:c.mode==='team'?4:c.size}
-function netSizeChange(v){if(NET.role==='host'){NET.cfg.size=v;const e=$('#nsizeV');if(e)e.textContent=v;clearTimeout(netSizeChange.t);netSizeChange.t=setTimeout(()=>netSend({t:'cfg',mode:NET.cfg.mode,size:v}),150)}}
+function netSizeChange(v){if(NET.role==='host'){NET.cfg.size=v;const e=$('#nsizeV');if(e)e.textContent=v;clearTimeout(netSizeChange.t);netSizeChange.t=setTimeout(()=>netSend({t:'cfg',mode:NET.cfg.mode,size:v,map:NET.cfg.map}),150)}}
 function netLobby(){
   NET.view='lobby';G.mode='menu';G.P=null;showHUD(false);
   const host=NET.role==='host',cfg=NET.cfg,tm=cfg.mode==='team',capN=netCap(),me=NET.players.find(p=>p.pid===NET.pid);
@@ -107,6 +107,7 @@ function netLobby(){
   <div class="tbl">${NET.players.map(p=>`<div class="tr${p.pid===NET.pid?' me':''}"><span>${p.pid===NET.hostPid?'★':''}</span><span>${esc(p.name)}</span><span>${tm?tl(p.team)+' · ':''}${CHARS[p.weapon]?CHARS[p.weapon].name:''}</span></div>`).join('')}</div>
   ${tm&&me?`<div class="group"><span class="glabel">Your team</span><div class="seg"><button data-act="n_team" data-v="0" aria-pressed="${me.team!==1}">Team A</button><button data-act="n_team" data-v="1" aria-pressed="${me.team===1}">Team B</button></div></div>`:''}
   ${host?`<div class="group"><span class="glabel">Mode</span><div class="seg">${Object.entries(MODES).map(([k,v])=>`<button data-act="n_mode" data-v="${k}" aria-pressed="${cfg.mode===k}">${v}</button>`).join('')}</div></div>
+  <div class="group"><span class="glabel">Map</span><div class="seg" style="grid-template-columns:repeat(4,1fr)">${[['random','Random'],...Object.entries(MAPS).map(([k,v])=>[k,v.name])].map(([k,v])=>`<button data-act="n_map" data-v="${k}" aria-pressed="${(cfg.map||'random')===k}">${v}</button>`).join('')}</div></div>
   ${cfg.mode==='br'?`<div class="group"><span class="glabel">Lobby size · <b id="nsizeV">${cfg.size}</b> fighters (empty slots are bots)</span><input class="nin" type="range" id="nsize" min="${Math.max(2,NET.players.length)}" max="16" value="${cfg.size}" style="padding:6px"></div>`:`<p class="lede">${cfg.mode==='duel'?'1v1: a small arena with a light zombie horde. First to 3 round wins.':'2v2: two teams of two, pick yours above. Bots fill empty team slots. Allies cannot hurt each other.'}</p>`}
   <div class="group"><span class="glabel">Bot skill</span><div class="seg">${Object.keys(DIFF).map(k=>`<button data-act="diff" data-v="${k}" aria-pressed="${G.diff===k}">${cap(k)}</button>`).join('')}</div></div>`:''}
   <details class="how"><summary>Change character</summary>${wepGrid()}</details>
@@ -122,14 +123,16 @@ function netAct2(act,v){
     case'n_leave':netLeave();break;
     case'n_lobby':netSend({t:'lobby'});break;
     case'n_rematch':if(NET.role==='host'){netSend({t:'rematch',diff:G.diff});if(!NET.auth)netHostStart()}break;
-    case'n_mode':if(NET.role==='host')netSend({t:'cfg',mode:v,size:NET.cfg.size});break;
+    case'n_mode':if(NET.role==='host')netSend({t:'cfg',mode:v,size:NET.cfg.size,map:NET.cfg.map});break;
+    case'n_map':if(NET.role==='host')netSend({t:'cfg',mode:NET.cfg.mode,size:NET.cfg.size,map:v});break;
     case'n_team':netSend({t:'upd',team:+v});break;
   }
 }
 
 // ---------- host: start / drops ----------
-function netDropInfo(){const fs=G.fighters.slice(0,N_FIGHT);return{dn:G.dropNo,sc:G.sc,ups:fs.map(f=>f.ups),pos:fs.map(f=>[Math.round(f.x),Math.round(f.y),q2(f.facing)])}}
+function netDropInfo(){const fs=G.fighters.slice(0,N_FIGHT);return{map:MAPID,dn:G.dropNo,sc:G.sc,ups:fs.map(f=>f.ups),pos:fs.map(f=>[Math.round(f.x),Math.round(f.y),q2(f.facing)])}}
 function netBuild(pl,cfg,localPid){
+  const mapId=(cfg.map&&MAPS[cfg.map])?cfg.map:Object.keys(MAPS)[Math.floor(Math.random()*3)];setMap(mapId);
   const hn=pl.length,c=setupMode(Object.assign({},cfg,{n:Math.max(cfg.size||cfg.n||16,hn)}));
   const team=c.mode==='team';let slots;
   if(team){const a=pl.filter(p=>p.team!==1).slice(0,2),b=pl.filter(p=>p.team===1).slice(0,2);slots=[a[0],a[1],b[0],b[1]]}
@@ -296,7 +299,7 @@ function netApplyDrop(d){
   G.fighters=fs;NET.zm.clear();
   fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
-  mapReset();G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
+  if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
   G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
   SFX.drop();G.mode='count';G.countdown=3.2;hide();showHUD(true);
 }

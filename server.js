@@ -103,7 +103,7 @@ function startSim(room, diff) {
   room.timer = setTimeout(loop, step);
 }
 const roomCap = room => room.cfg.mode === 'duel' ? 2 : room.cfg.mode === 'team' ? 4 : room.cfg.size;
-const newCfg = () => ({ mode: 'br', size: 16 });
+const newCfg = () => ({ mode: 'br', size: 16, map: 'random' });
 const list = room => [...room.players.values()].map(p => ({ pid: p.pid, name: p.name, weapon: p.weapon, team: p.team }));
 function bcastPlayers(room) {
   const msg = { t: 'players', host: room.host, players: list(room), started: room.started, cfg: room.cfg };
@@ -180,7 +180,8 @@ wss.on('connection', (ws, req) => {
         const cap = mode === 'duel' ? 2 : mode === 'team' ? 4 : size;
         if (mode === 'br') size = Math.max(size, room.players.size);
         else if (room.players.size > cap) return send(ws, { t: 'err', msg: 'Too many players in the room for ' + (mode === 'duel' ? '1v1' : '2v2') + '.' });
-        room.cfg = { mode, size };
+        const map = ['random', 'hotel', 'camp', 'hospital'].includes(m.map) ? m.map : 'random';
+        room.cfg = { mode, size, map };
         if (mode === 'team') { let a = 0, b = 0; for (const q of room.players.values()) { if (q.team === 1) b++; else a++; } for (const q of room.players.values()) { if (q.team === 1 && b > 2) { q.team = 0; b--; a++; } else if (q.team !== 1 && a > 2) { q.team = 1; a--; b++; } } }
         return bcastPlayers(room);
       }
