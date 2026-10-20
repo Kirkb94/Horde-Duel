@@ -283,18 +283,35 @@ const fv=f=>{let v=FOV*(1-.6*(f.zoomK||0));if(G.bo&&G.bo.s===2)v=Math.min(v,BO_F
 const PTS=[10,7,5,4,3,3,2,2,1,1,1,0,0,0,0,0];
 const NAMES=['Vex','Rook','Nyx','Jett','Orin','Kade','Mara','Sol','Tarn','Pike','Zed','Iris','Bram','Lux','Dax'];
 
+// Single source of truth for weapon damage / fire rate / ammo.
+// damage = per pellet/bullet, rate = triggers per second, clip = rounds, reload = seconds.
+// Tuning target: burst DPS (damage*n*burst*rate) ~48-75 for ranged weapons, sniper ~60 but 2 hits kills <=220 HP.
+// Player HP is 150-230 (CHARS.hpMax).
+const WEAPON_CFG={
+  pistol:{damage:15,rate:3.8,clip:12,reload:1.1},
+  revolver:{damage:34,rate:2.2,clip:6,reload:1.6},
+  smg:{damage:8,rate:11,clip:32,reload:1.6},
+  rifle:{damage:11,rate:6,clip:24,reload:1.5},
+  shotgun:{damage:9,rate:1.4,clip:6,reload:2},
+  sniper:{damage:110,rate:.55,clip:5,reload:5},
+  rocket:{damage:50,rate:.85,clip:4,reload:2.6},
+  crossbow:{damage:42,rate:1.3,clip:3,reload:1.9},
+  carbine:{damage:11,rate:1.8,clip:30,reload:1.7},
+  scorch:{damage:3,rate:16,clip:56,reload:2.4},
+  sword:{damage:26,rate:2.6,clip:999,reload:.1}
+};
 const WEAPONS={
-  pistol:{name:'Pistol',pattern:'straight',damage:15,rate:3.8,n:1,spread:0,jitter:1,speed:900,life:0.7,spin:0,pierce:0,clip:12,reload:1.1,blurb:'Steady and reliable at any range'},
-  revolver:{name:'Revolver',pattern:'straight',damage:34,rate:2.2,n:1,spread:0,jitter:.5,speed:1000,life:0.6,spin:0,pierce:0,clip:6,reload:1.6,blurb:'Heavy hitter, six rounds then a slow reload'},
-  smg:{name:'SMG',pattern:'straight',damage:9,rate:11,n:1,spread:0,jitter:5,speed:850,life:0.55,spin:0,pierce:0,clip:36,reload:1.6,blurb:'Bullet hose, shreds up close'},
-  rifle:{name:'Rifle',pattern:'straight',damage:11,rate:6,n:1,spread:0,jitter:0,speed:950,life:0.75,spin:0,pierce:0,clip:24,reload:1.5,blurb:'Fast, accurate, low damage per hit'},
-  shotgun:{name:'Shotgun',pattern:'straight',damage:10,rate:1.4,n:7,spread:22,jitter:3,speed:900,life:0.4,spin:0,pierce:0,clip:6,reload:2,blurb:'Seven pellets per blast, deadly up close'},
-  sniper:{name:'Sniper',pattern:'straight',damage:150,rate:.55,n:1,spread:0,jitter:0,speed:2175,life:0.5,spin:0,pierce:0,clip:5,reload:5,blurb:'Bolt action: you work the bolt between every shot, five rounds, then a very long reload. Z zooms in: a tighter cone that sees much farther'},
-  rocket:{name:'Rocket Launcher',pattern:'straight',damage:44,rate:.85,n:1,spread:0,jitter:.5,speed:640,life:1.1,spin:0,pierce:0,clip:4,reload:2.6,blurb:'Slow rockets with a big blast'},
-  crossbow:{name:'Arc Crossbow',pattern:'straight',damage:38,rate:1.3,n:1,spread:0,jitter:0,speed:1250,life:0.55,spin:0,pierce:0,pf:1,clip:3,reload:1.9,blurb:'Heavy bolts that pierce one foe and pin whoever they hit'},
-  carbine:{name:'Burst Carbine',pattern:'straight',damage:11,rate:1.8,n:1,spread:0,jitter:1.2,speed:1050,life:0.6,spin:0,pierce:0,burst:3,clip:30,reload:1.7,blurb:'Tight three-round bursts, +25% damage on scanned foes'},
-  scorch:{name:'Scorcher',pattern:'straight',damage:3,rate:16,n:1,spread:0,jitter:16,speed:520,life:0.36,spin:0,pierce:0,pf:3,clip:56,reload:2.4,blurb:'Short-range flamethrower. Burns for two seconds after contact'},
-  sword:{name:'Sword',pattern:'straight',damage:26,rate:2.6,n:1,spread:0,jitter:0,speed:1000,life:.06,spin:0,pierce:0,clip:999,reload:.1,blurb:'Wide arc slash, close range'}
+  pistol:{name:'Pistol',pattern:'straight',...WEAPON_CFG.pistol,n:1,spread:0,jitter:1,speed:900,life:0.7,spin:0,pierce:0,blurb:'Steady and reliable at any range'},
+  revolver:{name:'Revolver',pattern:'straight',...WEAPON_CFG.revolver,n:1,spread:0,jitter:.5,speed:1000,life:0.6,spin:0,pierce:0,blurb:'Heavy hitter, six rounds then a slow reload'},
+  smg:{name:'SMG',pattern:'straight',...WEAPON_CFG.smg,n:1,spread:0,jitter:5,speed:850,life:0.55,spin:0,pierce:0,blurb:'Bullet hose, shreds up close'},
+  rifle:{name:'Rifle',pattern:'straight',...WEAPON_CFG.rifle,n:1,spread:0,jitter:0,speed:950,life:0.75,spin:0,pierce:0,blurb:'Fast, accurate, low damage per hit'},
+  shotgun:{name:'Shotgun',pattern:'straight',...WEAPON_CFG.shotgun,n:7,spread:22,jitter:3,speed:900,life:0.4,spin:0,pierce:0,blurb:'Seven pellets per blast, deadly up close'},
+  sniper:{name:'Sniper',pattern:'straight',...WEAPON_CFG.sniper,n:1,spread:0,jitter:0,speed:2175,life:0.5,spin:0,pierce:0,blurb:'Bolt action: you work the bolt between every shot, five rounds, then a very long reload. Z zooms in: a tighter cone that sees much farther'},
+  rocket:{name:'Rocket Launcher',pattern:'straight',...WEAPON_CFG.rocket,n:1,spread:0,jitter:.5,speed:640,life:1.1,spin:0,pierce:0,blurb:'Slow rockets with a big blast'},
+  crossbow:{name:'Arc Crossbow',pattern:'straight',...WEAPON_CFG.crossbow,n:1,spread:0,jitter:0,speed:1250,life:0.55,spin:0,pierce:0,pf:1,blurb:'Heavy bolts that pierce one foe and pin whoever they hit'},
+  carbine:{name:'Burst Carbine',pattern:'straight',...WEAPON_CFG.carbine,n:1,spread:0,jitter:1.2,speed:1050,life:0.6,spin:0,pierce:0,burst:3,blurb:'Tight three-round bursts, +25% damage on scanned foes'},
+  scorch:{name:'Scorcher',pattern:'straight',...WEAPON_CFG.scorch,n:1,spread:0,jitter:16,speed:520,life:0.36,spin:0,pierce:0,pf:3,blurb:'Short-range flamethrower. Burns for two seconds after contact'},
+  sword:{name:'Sword',pattern:'straight',...WEAPON_CFG.sword,n:1,spread:0,jitter:0,speed:1000,life:.06,spin:0,pierce:0,blurb:'Wide arc slash, close range'}
 };
 const WKEYS=Object.keys(WEAPONS);
 const CHARS={
@@ -1136,6 +1153,26 @@ addEventListener('keydown',e=>{if(e.code==='KeyM'){SFX.toggle();const b=document
 const SEG0=[[0,20,2900,2900],[20,55,2900,1750],[55,70,1750,1750],[70,105,1750,1000],[105,120,1000,1000],[120,150,1000,520],[150,162,520,520],[162,195,520,200],[195,207,200,200],[207,240,200,0],[240,1e9,0,0]];
 let SEG=SEG0;
 const SEG_DPS=[0,5,5,8,8,12,12,18,18,28,45];
+// ---------- Horde tuning (all horde balance numbers live here) ----------
+// br values are for a full 16-player lobby and are scaled by a2 (=n/16 style scale) in setupMode.
+const HORDE_TUNE={
+  br:{cap:128,capMin:16,base:22.4,baseMin:4,rate:.48,rateMin:.12,ini:30,iniMin:6,spr:16,sprMin:2,ext:130},
+  arena:{cap:27,base:4.8,rate:.16,ini:6,spr:2,ext:24},
+  targetMul:.88,        // global multiplier on the target horde size
+  aliveFloor:.6,        // BR: horde share left when only 1 of N players remains (1 = ignore alive count)
+  hpMul:1.5,            // horde zombie health multiplier
+  hpPerMin:.06,         // extra horde zombie health per minute of match time (0 = off)
+  hpGrowthCap:.4        // max extra health from time growth (.4 = +40%)
+};
+function hordeAliveMul(){
+  if(!G.cfg||G.cfg.mode!=='br'||!(N_FIGHT>0))return 1;
+  let a=0;for(const f of G.fighters)if(!f.zomb&&f.alive)a++;
+  const k=Math.max(0,Math.min(1,a/N_FIGHT));
+  return HORDE_TUNE.aliveFloor+(1-HORDE_TUNE.aliveFloor)*k;
+}
+function hordeHpMul(){
+  return HORDE_TUNE.hpMul*(1+Math.min(HORDE_TUNE.hpGrowthCap,HORDE_TUNE.hpPerMin*(G.time||0)/60));
+}
 // ---------- Match modes: battle royale (2-16 fighters), 1v1, 2v2 ----------
 const isAlly=(a,b)=>!!a&&!!b&&a!==b&&a.team!==undefined&&a.team===b.team;
 const MODES={br:'Battle royale',duel:'1v1',team:'2v2'};
@@ -1147,8 +1184,8 @@ function setupMode(c){
   N_FIGHT=c.n;R0=2900*s;
   SEG=SEG0.map(q=>[q[0]*ts,q[1]>1e8?q[1]:q[1]*ts,q[2]*s,q[3]*s]);
   G.cfg=c;G.ms=s;G.os=arena?.3:a2;
-  if(arena){HCAP=27;G.hbase=4.8;G.hrate=.16;G.hini=6;G.hspr=2;G.hext=24}
-  else{HCAP=Math.max(16,Math.round(128*a2));G.hbase=Math.max(4,22.4*a2);G.hrate=Math.max(.12,.48*a2);G.hini=Math.max(6,Math.round(30*a2));G.hspr=Math.max(2,Math.round(16*a2));G.hext=Math.round(130*a2)}
+  if(arena){const A=HORDE_TUNE.arena;HCAP=A.cap;G.hbase=A.base;G.hrate=A.rate;G.hini=A.ini;G.hspr=A.spr;G.hext=A.ext}
+  else{const B=HORDE_TUNE.br;HCAP=Math.max(B.capMin,Math.round(B.cap*a2));G.hbase=Math.max(B.baseMin,B.base*a2);G.hrate=Math.max(B.rateMin,B.rate*a2);G.hini=Math.max(B.iniMin,Math.round(B.ini*a2));G.hspr=Math.max(B.sprMin,Math.round(B.spr*a2));G.hext=Math.round(B.ext*a2)}
   return c;
 }
 function storm(t){
@@ -2656,7 +2693,7 @@ function drawZombie(z){
 // ---------- Horde (replaces the storm) ----------
 function hordeZombie(x,y){
   const brute=Math.random()<.07,z=makeZombie(brute?'brute':'walker',x,y,1);
-  z.zhp=Math.round(z.zhp*1.5);z.hp=z.zhp;z.ox=rnd(-1,1)*200;z.oy=rnd(-1,1)*200;z.los=false;z.losT=Math.random()*.3;z.chkT=1;z.cx=x;z.cy=y;z.unst=0;
+  z.zhp=Math.round(z.zhp*hordeHpMul());z.hp=z.zhp;z.ox=rnd(-1,1)*200;z.oy=rnd(-1,1)*200;z.los=false;z.losT=Math.random()*.3;z.chkT=1;z.cx=x;z.cy=y;z.unst=0;
   z.name='A zombie';z.zb=(brute?.085:.115)*1.25*rnd(.85,1.2);z.zspd=z.zb;z.xpv=brute?35:8;z.sp=Math.random()<.5?1:-1;z.so=0;z.sT=Math.random()*.4;
   return z;
 }
@@ -2690,7 +2727,7 @@ function hordeStep(dt){
   chewStep(dt);
   G.hzT-=dt;
   if(G.hzT<=0){
-    G.hzT=.25;const Re=Math.min(st.r,1950),want=Math.min(HCAP,Math.round((G.hbase+Math.floor(G.time*G.hrate))*.88));
+    G.hzT=.25;const Re=Math.min(st.r,1950),want=Math.min(HCAP,Math.round((G.hbase+Math.floor(G.time*G.hrate))*HORDE_TUNE.targetMul*hordeAliveMul()));
     if(G.hzN<want)hordeEdge(st.cx,st.cy,Re,Math.min(2,want-G.hzN));
   }
   // sprinters: fragile but faster than any hero, they start coming once the first zone shrink is done
