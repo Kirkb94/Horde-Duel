@@ -100,10 +100,30 @@ function serveStatic(req, res, url) {
   const full = path.join(PUBLIC, rel);
   if (full !== PUBLIC && !full.startsWith(PUBLIC + path.sep)) return plain(res, 403, 'Forbidden');
   const respond = c => {
-    const headers = Object.assign({ 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'ETag': c.etag, 'Vary': 'Accept-Encoding' }, SEC_HEADERS);
+    const isAudio = path.extname(full).toLowerCase() === '.mp3' && rel.startsWith('/audio/');
+    const headers = Object.assign({ 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream', 'Cache-Control': isAudio ? 'public, max-age=31536000, immutable' : 'no-cache', 'ETag': c.etag, 'Vary': 'Accept-Encoding' }, SEC_HEADERS);
     if (String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') headers['Strict-Transport-Security'] = 'max-age=15552000';
     const inm = req.headers['if-none-match'];
     if (inm && inm.split(',').some(t => t.trim().replace(/^W\//, '') === c.etag)) { res.writeHead(304, headers); return res.end(); }
+    if (path.extname(full) === '.mp3') {
+      headers['Accept-Ranges'] = 'bytes';
+      const rg = req.headers['range'], ifr = req.headers['if-range'];
+      const m = rg && (!ifr || ifr === c.etag) && /^bytes=(\d*)-(\d*)$/.exec(String(rg).trim());
+      if (m && (m[1] !== '' || m[2] !== '')) {
+        const size = c.data.length;
+        let start, end;
+        if (m[1] === '') { const n = +m[2]; start = Math.max(0, size - n); end = size - 1; }
+        else { start = +m[1]; end = m[2] === '' ? size - 1 : Math.min(+m[2], size - 1); }
+        if (size === 0 || start >= size || start > end) {
+          headers['Content-Range'] = 'bytes */' + size;
+          res.writeHead(416, headers); return res.end();
+        }
+        headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + size;
+        headers['Content-Length'] = end - start + 1;
+        res.writeHead(206, headers);
+        return res.end(req.method === 'HEAD' ? undefined : c.data.subarray(start, end + 1));
+      }
+    }
     let body = c.data;
     if (c.gz && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) { body = c.gz; headers['Content-Encoding'] = 'gzip'; }
     headers['Content-Length'] = body.length;
@@ -255,6 +275,7 @@ function cleanGameMsg(d) {
       out.a.push([a[0]].concat(a.slice(1, 3).map(v => numIn(v, -1e5, 1e5))));
     }
     if (typeof d.sv === 'number' && Number.isFinite(d.sv)) out.sv = Math.round(numIn(d.sv, -1, 1000));
+    if (typeof d.q === 'number' && Number.isFinite(d.q)) out.q = Math.round(numIn(d.q, 0, 1e9));
     return out;
   }
   if (d.k === 'ready') {

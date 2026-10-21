@@ -987,6 +987,30 @@ function collide(f){
 }
 
 
+// ---------- Audio preload cache (narrator + voices) ----------
+const PRE=(()=>{
+  const cache={},q=[];let fly=0;
+  function pump(){
+    while(fly<3&&q.length){
+      const u=q.shift();if(cache[u])continue;
+      let a;try{a=new Audio();a.preload='auto'}catch(e){continue}
+      cache[u]=a;fly++;
+      let fin=false;const end=()=>{if(fin)return;fin=true;fly--;pump()};
+      a.addEventListener('canplaythrough',end);a.addEventListener('error',end);
+      setTimeout(end,6000);
+      try{a.src=u;a.load()}catch(e){end()}
+    }
+  }
+  function queue(urls){for(const u of urls)if(!cache[u]&&!q.includes(u))q.push(u);pump()}
+  // a preloaded element (used once), or a fresh one
+  function take(u){
+    const a=cache[u];
+    if(a){delete cache[u];if(!a.error)return a}
+    return new Audio(u);
+  }
+  return {queue,take};
+})();
+
 // ---------- Radio narrator (recorded lines in public/audio/narrator/) ----------
 // Add a filename (no extension) to NARR_FILES once its mp3 is recorded; takes of one moment share a name apart from the trailing _NN.
 const NARR=(()=>{
@@ -1012,7 +1036,7 @@ const NARR=(()=>{
     if(list.length>1&&pick===last[group])pick=list[(list.indexOf(pick)+1)%list.length];
     last[group]=pick;
     try{
-      const a=new Audio('audio/narrator/'+pick+'.mp3');
+      const a=PRE.take('audio/narrator/'+pick+'.mp3');
       a.volume=Math.max(0,Math.min(1,VOLK));
       const done=()=>{if(cur===a){cur=null;if(qd){const g=qd;qd=null;say(g)}}};
       a.addEventListener('ended',done);a.addEventListener('error',done);
@@ -1049,7 +1073,21 @@ const NARR=(()=>{
   }
   // extra countdown seconds so the opening line can finish before 3-2-1 (0 when no recording exists for this drop)
   function has(g){return pool(g).length>0}
-  function lead(){const g=G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start';if(!has(g))return 0;let s=5;if(g==='vo_match_start'&&!G.zmode&&G.cfg&&has('vo_start_'+G.cfg.mode))s+=4;return s}
+  // queue narrator mp3s (opening + countdown first, then common in-match calls) so first play has no network lag
+  function preload(){
+    try{
+      if(typeof SFX==='undefined'||!SFX.on)return;
+      const mode=G.cfg&&G.cfg.mode;
+      const order=['match_start','next_drop','sudden','count_03','count_02','count_01','count_go'];
+      if(mode)order.push('start_'+mode);
+      order.push('zone_warning','zone_shrinking','horde_surge','you_kill','you_down','you_eliminated','elim_storm','elim_horde','mate_down','mate_lost','other_elim','outside_zone','surrounded','hunter','horde_growing','zone_final','revive_give','revive_get','match_win','match_win_team','match_lose');
+      const urls=[];
+      for(const b of order)for(const n of FILES)if(n.slice(0,-3)==='vo_'+b)urls.push('audio/narrator/'+n+'.mp3');
+      PRE.queue(urls);
+    }catch(e){}
+    try{if(typeof VOICE!=='undefined')VOICE.preload()}catch(e){}
+  }
+  function lead(){preload();const g=G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start';if(!has(g))return 0;let s=5;if(g==='vo_match_start'&&!G.zmode&&G.cfg&&has('vo_start_'+G.cfg.mode))s+=4;return s}
   // ---- match-moment hooks ----
   const mkS=()=>({t:-1,warn:-1,shr:-1,sg:-1,fin:false,grow:false,out:0,sc:0,amb:-99,o:-99,h:-99,s:-99,shrT:0});
   let S=mkS();
@@ -1102,7 +1140,7 @@ const NARR=(()=>{
     }
   }
   const busy=()=>!!(cur&&!cur.ended&&!cur.paused);
-  return {say,stop,lead,has,step,down,revive,elim,busy};
+  return {say,stop,lead,has,step,down,revive,elim,busy,preload};
 })();
 
 // ---------- Character voices (recorded lines in public/audio/voices/<character>/) ----------
@@ -1148,7 +1186,7 @@ const VOICE=(()=>{
     last[c+k]=pick;
     stop();
     try{
-      const a=new Audio('audio/voices/'+c+'/'+pick+'.mp3');
+      const a=PRE.take('audio/voices/'+c+'/'+pick+'.mp3');
       a.volume=Math.max(0,Math.min(1,VOLK));
       const done=()=>{if(cur===a){cur=null;lastEnd=now()}};
       a.addEventListener('ended',done);
@@ -1161,6 +1199,21 @@ const VOICE=(()=>{
   }
   setInterval(()=>{if(cur){if(typeof SFX==='undefined'||!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK))}},250);
   function later(k,wait,ch){const c=ch||who();if(c&&lib[c][k]&&pend.length<4)pend.push({c,k,exp:now()+wait})}
+  // queue mp3s of the local character and the 2v2 ally (intro/callouts first)
+  function preload(){
+    try{
+      if(typeof SFX==='undefined'||!SFX.on||G.debug||G.zmode||!G.P)return;
+      const cs=[];const me=who(),al=allyC();if(me)cs.push(me);if(al&&al!==me)cs.push(al);
+      for(const c of cs){
+        const keys=Object.keys(lib[c]);
+        const hi=k=>/^(intro|match_start|round_start|next_drop|callout_|ability_|revive_|kill_|down_|hurt_)/.test(k)?0:1;
+        keys.sort((x,y)=>hi(x)-hi(y));
+        const urls=[];
+        for(const k of keys)for(const f of lib[c][k])if(!bad[c+f])urls.push('audio/voices/'+c+'/'+f+'.mp3');
+        PRE.queue([...new Set(urls)]);
+      }
+    }catch(e){}
+  }
   // character name of a living standing teammate (2v2 only) who has recorded lines, else null
   function allyC(){
     if(G.debug||G.zmode||!G.P||!G.cfg||G.cfg.mode!=='team')return null;
@@ -3036,7 +3089,7 @@ function startMatch(){
   resetMatch();G.debug=false;G.zmode=false;G.fighters=[];setMap(G.daily?G.daily.map:pickMap());
   const mc=G.daily?(G.dScore=0,setupMode({mode:'br',n:8,mods:[G.daily.mod]})):setupMode({mode:G.gmode,n:G.gsize,mods:G.mods||[]});
   for(let i=0;i<N_FIGHT;i++){const f=makeFighter(i,i===0?(G.daily?G.daily.weapon:G.pick):WKEYS[Math.floor(Math.random()*WKEYS.length)]);if(mc.mode==='team')f.team=i<2?0:1;G.fighters.push(f)}
-  G.P=G.fighters[0];G.dropNo=1;startDrop();NARR.say('vo_start_'+mc.mode,{queue:true});
+  G.P=G.fighters[0];G.dropNo=1;startDrop();NARR.preload();NARR.say('vo_start_'+mc.mode,{queue:true});
   try{if(!localStorage.getItem('hordemarkers')){localStorage.setItem('hordemarkers','1');feedAdd('Green corners mark buildings, green dots mark doorways',true)}}catch(e){}
   try{if(!localStorage.getItem('hordearmor')){localStorage.setItem('hordearmor','1');feedAdd('Blue shield icons on the map are armor pickups (+50 armor)',true)}}catch(e){}
 }

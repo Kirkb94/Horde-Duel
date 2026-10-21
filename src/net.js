@@ -149,7 +149,7 @@ function netRecvInner(from,d){
   if(NET.m==='host'){
     if(d.k==='i'){const c=NET.cl[from];if(!c)return;let I=NET.inp[from];if(!I)I=NET.inp[from]={acts:[]};
       I.mx=clamp(+d.mx||0,-1,1);I.my=clamp(+d.my||0,-1,1);I.f=+d.f||0;I.fr=d.fr?1:0;if(Array.isArray(d.a)&&I.acts.length<12)for(const a of d.a.slice(0,6))I.acts.push(a);
-      if(typeof d.sv==='number')c.sv=d.sv}
+      if(typeof d.sv==='number')c.sv=d.sv;if(typeof d.q==='number')c.ak=d.q}
     else if(d.k==='ready'){const c=NET.cl[from];if(!c||G.mode!=='between'||NET.ready[from])return;
       if(Array.isArray(d.picks))for(const p of d.picks.slice(0,8))if(Array.isArray(p)&&UP[p[0]])applyUpgrade(c.f,p[0],1);
       c.f.pend=0;NET.ready[from]=true;netHostCheckNext()}
@@ -380,7 +380,7 @@ function netSnapFor(c){
     if(e.only&&e.only.indexOf(f.id)<0)continue;
     if(!e.all&&(e.x-cx)*(e.x-cx)+(e.y-cy)*(e.y-cy)>1500*1500)continue;E.push(e)}
   c.evi=NET.evBase+NET.ev.length;
-  return{k:'s',T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,M,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
+  return{k:'s',ak:c.ak,T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,M,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
 }
 function netHostTick(dt){
   if(!NET.live)return;
@@ -395,7 +395,7 @@ function netHostTick(dt){
 }
 // ---------- client ----------
 function netOnStart(d){
-  NET.m='client';NET.live=true;NET.acts=[];NET.zm.clear();NET.paused=false;NET.gotSnap=false;
+  NET.m='client';NET.live=true;NET.acts=[];NET.hist=[];NET.zm.clear();NET.paused=false;NET.gotSnap=false;
   G.debug=false;G.zmode=false;if(DIFF[d.diff])G.diff=d.diff;G.fighters=[];setupMode(d.cfg);
   d.ros.forEach((r,i)=>{const f=makeFighter(i,r[2]);f.name=r[1];f.pid=r[0];f.isAI=r[0]!==NET.pid;if(r[3]>=0)f.team=r[3];f.pend=0;f.tx=f.x;f.ty=f.y;f.tf=0;G.fighters.push(f);if(r[0]===NET.pid)NET.my=i});
   G.P=G.fighters[NET.my];G.P.isAI=false;G.dropNo=1;
@@ -408,7 +408,7 @@ function netApplyDrop(d){
   fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
   if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sudden=!!d.su;G.draw=false;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;boReset();G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
-  G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
+  G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hist=[];NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
   SFX.drop();NARR.say(G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start',{force:true});G.mode='count';G.countdown=3.2+NARR.lead();hide();showHUD(true);
 }
 function netApplySnap(d){
@@ -432,11 +432,12 @@ function netApplySnap(d){
       if((k==='dashSp'||k==='dashDir')&&!(dsp>800))continue;
       P[k]=v}
     P.tx=t[1];P.ty=t[2];G.pending=P.pend||0;
-    {const ex=P.tx-P.x,ey=P.ty-P.y,er=Math.hypot(ex,ey),mv=Math.hypot(P.mv.x,P.mv.y)>.1||P.dashT>0;
+    {let ex=P.tx-P.x,ey=P.ty-P.y,er=Math.hypot(ex,ey),acked=false;const mv=Math.hypot(P.mv.x,P.mv.y)>.1||P.dashT>0;
+      const H=NET.hist;if(H&&typeof d.ak==='number'){while(H.length&&H[0].q<d.ak)H.shift();if(H.length&&H[0].q===d.ak&&!(P.jumpT>0)&&!(P.dashT>0&&P.dashSp>800)){ex=P.tx-H[0].x;ey=P.ty-H[0].y;er=Math.hypot(ex,ey);acked=true}}
       // host position trails the predicted one by ~RTT while moving: tolerate that lag, only correct real divergence
-      const tol=mv?Math.max(70,(NET.rtt||120)*.42):10;
-      if(!P.alive||er>Math.max(260,tol*3)){P.x=P.tx;P.y=P.ty}
-      else if(er>tol){const k=.1*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
+      const tol=acked?14:mv?Math.max(70,(NET.rtt||120)*.42):10;
+      if(!P.alive||er>(acked?120:Math.max(260,tol*3))){P.x=P.tx;P.y=P.ty}
+      else if(er>tol){const k=(acked?.3:.1)*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
     if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt();if(typeof VOICE!=='undefined')VOICE.hurt(hp0-P.hp)}
   }
   // others
@@ -565,7 +566,8 @@ function controlNet(dt){
 }
 function netSendInput(){
   const P=G.P;if(!P||NET.m!=='client')return;
-  netRel(NET.hostPid,{k:'i',mx:q2(P.mv.x),my:q2(P.mv.y),f:q2(P.facing),fr:P.wantFire?1:0,a:NET.acts,sv:(G.spec&&!P.alive)?G.spec.id:-1});
+  const q=(NET.seq=(NET.seq||0)+1);(NET.hist||(NET.hist=[])).push({q,x:P.x,y:P.y});if(NET.hist.length>90)NET.hist.shift();
+  netRel(NET.hostPid,{k:'i',q,mx:q2(P.mv.x),my:q2(P.mv.y),f:q2(P.facing),fr:P.wantFire?1:0,a:NET.acts,sv:(G.spec&&!P.alive)?G.spec.id:-1});
   NET.acts=[];
 }
 function netClientResults(d){
