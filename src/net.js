@@ -59,7 +59,19 @@ function netWakeTry(){
   ws.onclose=()=>{clearTimeout(to);if(NET.ws!==ws)return;NET.ws=null;if(NET.wake===W)W.tm=setTimeout(netWakeTry,W.n<3?1500:3000);else netDropped(NET.status||NET.code||NET.live?'Lost connection to the server.':'Could not reach the server. Check the address under Server.')};
   ws.onerror=()=>{};
 }
-setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&!NET.chk&&Date.now()-(NET.rx||0)>12000){netDropped('Lost connection to the server (timed out).');return}netSend({t:'ping',ts:Date.now()})}},3000);
+setInterval(()=>{
+  if(NET.ws&&NET.ws.readyState===1){
+    if(!document.hidden&&!NET.chk){
+      if(Date.now()-(NET.rx||0)>8000){netDropped('Lost connection to the server (timed out).');return}
+      // server-authoritative: pongs still arrive but snapshots stopped. Only count time spent in play/count.
+      if(NET.auth&&NET.live&&NET.gotSnap&&(G.mode==='play'||G.mode==='count')){
+        if(!NET.modeSince)NET.modeSince=performance.now();
+        if(performance.now()-NET.modeSince>6000&&performance.now()-NET.lastSnap>6000){NET.modeSince=0;netDropped('Lost connection to the server (no game updates).');return}
+      }else NET.modeSince=0;
+    }
+    netSend({t:'ping',ts:Date.now()})
+  }
+},2000);
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
   const ws=NET.ws,t=Date.now();
@@ -78,19 +90,25 @@ function netSess(){try{const s=JSON.parse(sessionStorage.getItem('hordesess')||'
 function netSessSave(m){try{if(m.token&&(m.auth||m.pid===m.host))sessionStorage.setItem('hordesess',JSON.stringify({code:m.code,token:m.token,rel:m.auth?0:1}));else sessionStorage.removeItem('hordesess')}catch(e){}}
 function netSessClear(){try{sessionStorage.removeItem('hordesess')}catch(e){}}
 function netResume(){if(SIM||NET.reco||NET.ws)return;const s=netSess();if(!s)return;if(s.rel){netSessClear();return}NET.auth=true;NET.reco={t0:Date.now(),n:0,tm:0};netRecoTry()}
-function netRecoStop(){if(NET.reco){clearTimeout(NET.reco.tm);NET.reco=null}}
+function netBanner(n){
+  let b=document.getElementById('netBanner');
+  if(n<0){if(b)b.style.display='none';return}
+  if(!b){b=document.createElement('div');b.id='netBanner';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;padding:8px 12px;text-align:center;font:700 14px system-ui,sans-serif;background:#c0392b;color:#fff;pointer-events:none';document.body.appendChild(b)}
+  b.textContent='Reconnecting… attempt '+(n+1);b.style.display='block';
+}
+function netRecoStop(){netBanner(-1);if(NET.reco){clearTimeout(NET.reco.tm);NET.reco=null}}
 function netRecoShow(){NET.view='reco';G.mode='menu';show(`<p class='eyebrow'>Connection lost</p><h1>Reconnecting<em>…</em></h1><p class='lede'>Trying to get you back into your match${NET.reco&&NET.reco.n?' (attempt '+(NET.reco.n+1)+')':''}. A bot plays your fighter meanwhile.</p><button class='go ghost' data-act='n_leave'>Give up</button>`)}
 function netRecoFail(msg){netRecoStop();netSessClear();if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();NET.notice=msg||'Could not reconnect to the match.';netMenu()}
 function netRecoNext(){
   const R=NET.reco;if(!R)return;
-  R.n++;const d=Math.min(2000,1000*Math.pow(2,R.n-1));
+  R.n++;const cap=Math.min(4000,500*Math.pow(2,R.n-1)),d=Math.round(cap/2+Math.random()*cap/2);
   if(Date.now()-R.t0+d>REJOIN_MS){netRecoFail('Could not reconnect to the match.');return}
   clearTimeout(R.tm);R.tm=setTimeout(netRecoTry,d);
 }
 function netRecoTry(){
   const R=NET.reco;if(!R)return;
   if(Date.now()-R.t0>REJOIN_MS){netRecoFail('Could not reconnect to the match.');return}
-  if(!R.keep)netRecoShow();
+  netBanner(R.n);if(!R.keep)netRecoShow();
   let ws;try{ws=new WebSocket(netUrl())}catch(e){netRecoNext();return}
   NET.ws=ws;const to=setTimeout(()=>{try{ws.close()}catch(_){}},6000);
   ws.onopen=()=>{clearTimeout(to);NET.rx=Date.now();const s=netSess();if(!s){netRecoFail('Could not reconnect to the match.');return}netSend({t:'rejoin',code:s.code,token:s.token})};
@@ -123,16 +141,26 @@ function netMsg(m){
     netMsgInner(m);
   }catch(err){console.warn('netMsg error',err)}
 }
+function netLeaderChanged(prev,m){
+  if(!prev||prev===m.host)return;
+  const q=NET.players.find(p=>p.pid===m.host);if(!q)return;
+  const msg=m.host===NET.pid?'You are now the room leader':q.name+' is now the room leader';
+  if(NET.live||G.mode==='over'||G.mode==='between')feedAdd(msg,false);else NET.notice=msg;
+  if(G.mode==='over'){
+    const r=panel.querySelector('.row');if(r)r.innerHTML=netEndRow();
+    const l=document.getElementById('nlead');if(l)l.textContent=NET.role==='host'?'Start another match with the same players and settings.':'Waiting for the room leader to start a rematch.';
+  }
+}
 function netMsgInner(m){
   switch(m.t){
-    case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined)netRecoStop();if(m.started){NET.status='';break}netLobby();break;
+    case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined){netRecoStop();NET.lastSnap=performance.now();NET.modeSince=0}if(m.started){NET.status='';break}netLobby();break;
     case'players':
-      NET.players=m.players;NET.hostPid=m.host;if(m.cfg)NET.cfg=m.cfg;NET.role=NET.pid===m.host?'host':'client';
+      const pvHost=NET.hostPid;NET.players=m.players;NET.hostPid=m.host;if(m.cfg)NET.cfg=m.cfg;NET.role=NET.pid===m.host?'host':'client';netLeaderChanged(pvHost,m);
       if(!m.started&&NET.live){netCleanup();netLobby()}else if(!NET.live&&!m.started)netLobby();break;
     case'left':if(NET.m==='host')netBotify(m.pid);break;
     case'hostlost':if(NET.m==='client')feedAdd('Host connection lost - waiting up to '+Math.round((m.ms||30000)/1000)+'s for them to return',false);break;
     case'hostback':if(NET.m==='client')feedAdd('Host is back',false);break;
-    case'closed':netRecoStop();netSessClear();NET.code='';NET.role=null;if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netCleanup();NET.notice=m.reason||'The room was closed.';netMenu();break;
+    case'closed':netRecoStop();netSessClear();NET.code='';NET.role=null;if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netCleanup();NET.notice=m.restarting?'Server restarting for an update. Your match was ended - start a new room in about a minute.':(m.reason||'The room was closed.');netMenu();break;
     case'err':if(NET.reco){if(m.rejoin===false)netRecoFail(m.msg);else{if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netRecoNext()}break}if(m.rejoin===false)netSessClear();NET.status='';NET.notice=m.msg||'Error';if(NET.code)netLobby();else netMenu();break;
     case'pong':NET.rtt=Math.max(0,Date.now()-m.ts);NET.lag=Math.min(.12,NET.rtt/2000+.03);break;
     case'r':netRecv(m.from,m.d);break;
@@ -395,7 +423,7 @@ function netHostTick(dt){
 }
 // ---------- client ----------
 function netOnStart(d){
-  NET.m='client';NET.live=true;NET.acts=[];NET.hist=[];NET.zm.clear();NET.paused=false;NET.gotSnap=false;
+  NET.m='client';NET.live=true;NET.acts=[];NET.hist=[];NET.snapArr=0;NET.iv=0;NET.jit=0;NET.delay=0;NET.zm.clear();NET.paused=false;NET.gotSnap=false;
   G.debug=false;G.zmode=false;if(DIFF[d.diff])G.diff=d.diff;G.fighters=[];setupMode(d.cfg);
   d.ros.forEach((r,i)=>{const f=makeFighter(i,r[2]);f.name=r[1];f.pid=r[0];f.isAI=r[0]!==NET.pid;if(r[3]>=0)f.team=r[3];f.pend=0;f.tx=f.x;f.ty=f.y;f.tf=0;G.fighters.push(f);if(r[0]===NET.pid)NET.my=i});
   G.P=G.fighters[NET.my];G.P.isAI=false;G.dropNo=1;
@@ -406,14 +434,14 @@ function netApplyDrop(d){
   const fs=G.fighters.slice(0,N_FIGHT);
   G.fighters=fs;NET.zm.clear();
   fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
-    f.tx=f.x;f.ty=f.y;f.tf=f.facing});
+    f.tx=f.x;f.ty=f.y;f.tf=f.facing;f.sb=null});
   if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sudden=!!d.su;G.draw=false;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;boReset();G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
-  G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hist=[];NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
+  G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.snapArr=0;NET.hist=[];NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
   SFX.drop();NARR.say(G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start',{force:true});G.mode='count';G.countdown=3.2+NARR.lead();hide();showHUD(true);
 }
 function netApplySnap(d){
   if(!NET.live||NET.m!=='client'||!G.P)return;
-  const P=G.P,fs=G.fighters;NET.lastSnap=performance.now();NET.gotSnap=true;
+  const P=G.P,fs=G.fighters,now=performance.now();netJitter(now);NET.lastSnap=now;NET.gotSnap=true;
   const nm=MODEN[d.m];
   if(nm&&(G.mode==='count'||G.mode==='play'||G.mode==='ending')){
     if(nm==='ending'&&G.mode!=='ending'){G.winner=fs[d.w]||null;SFX.sting(d.w===NET.my)}
@@ -447,8 +475,8 @@ function netApplySnap(d){
         if(k==='x'||k==='y'||k==='facing')continue;
         if(k==='healKind'){f.healKind=v===1?'band':v===2?'kit':null;continue}
         f[k]=v}
-      f.tx=t[3];f.ty=t[4];f.tf=t[5];if(!f.known||!f.alive){f.x=f.tx;f.y=f.ty;f.facing=f.tf}f.known=true;
-    }else{f.tx=t[3];f.ty=t[4];f.known=false;f.x=f.tx;f.y=f.ty;if(t.length>5){f.hp=t[5];f.tagT=t[6];f.tagBy=t[7]}}
+      f.tx=t[3];f.ty=t[4];f.tf=t[5];if(!f.known||!f.alive){f.x=f.tx;f.y=f.ty;f.facing=f.tf;f.sb=null}else netSample(f,f.tx,f.ty,f.tf,now);f.known=true;
+    }else{f.tx=t[3];f.ty=t[4];f.known=false;f.sb=null;f.x=f.tx;f.y=f.ty;if(t.length>5){f.hp=t[5];f.tagT=t[6];f.tagBy=t[7]}}
     if(!f.alive){f.x=f.tx;f.y=f.ty}
   }
   // zombies (sent every other snapshot)
@@ -456,7 +484,7 @@ function netApplySnap(d){
     const seen=new Set(),Z=d.Z;
     for(let i=0;i<Z.length;i+=5){const id=Z[i]>>3,kc=Z[i]&7,a=Z[i+4];let z=NET.zm.get(id);
       if(!z){z=netMkZ(id,kc);NET.zm.set(id,z);fs.push(z);z.x=Z[i+1];z.y=Z[i+2];z.facing=Z[i+3]/10}
-      seen.add(id);z.tx=Z[i+1];z.ty=Z[i+2];z.tf=Z[i+3]/10;z.zhp=100;z.hp=a%101;z.hitFlash=(Math.floor(a/101)%2)*.1;z.swingT=Math.floor(a/202)*.1}
+      seen.add(id);z.tx=Z[i+1];z.ty=Z[i+2];z.tf=Z[i+3]/10;netSample(z,z.tx,z.ty,z.tf,now);z.zhp=100;z.hp=a%101;z.hitFlash=(Math.floor(a/101)%2)*.1;z.swingT=Math.floor(a/202)*.1}
     if(NET.zm.size!==seen.size){
       for(const [id,z] of NET.zm)if(!seen.has(id)){NET.zm.delete(id);z.alive=false}
       let w=N_FIGHT;for(let i=N_FIGHT;i<fs.length;i++){if(fs[i].alive)fs[w++]=fs[i]}fs.length=w;
@@ -469,6 +497,43 @@ function netApplySnap(d){
   if(d.O)G.orbs=d.O.map(t=>({x:t[0],y:t[1],t:t[2],item:ITM[t[3]]}));
   G.deploys=d.D.map(o=>{o.owner=fs[o.oid]||fs[0];return o});
   for(const e of d.E)netReplay(e);
+}
+// ---------- snapshot interpolation / jitter buffer ----------
+// Track snapshot arrival interval + jitter; remote entities are drawn NET.delay ms in the past so there are
+// almost always two samples to interpolate between.
+function netJitter(now){
+  const l=NET.snapArr;NET.snapArr=now;if(!l)return;
+  const dt=now-l;if(dt<=0||dt>500)return;
+  NET.iv=NET.iv?NET.iv*.9+dt*.1:dt;
+  NET.jit=(NET.jit||0)*.9+Math.abs(dt-NET.iv)*.1;
+  NET.delay=Math.max(100,Math.min(300,NET.iv*2+NET.jit*2.5));
+}
+function netSample(f,x,y,a,now){
+  const b=f.sb||(f.sb=[]),l=b[b.length-1];
+  if(l){
+    if(now<=l.t)return;
+    if((x-l.x)*(x-l.x)+(y-l.y)*(y-l.y)>40000){b.length=0;f.x=x;f.y=y}
+  }
+  b.push({t:now,x,y,a});if(b.length>10)b.shift();
+}
+function netInterp(f,rt){
+  const b=f.sb;
+  while(b.length>2&&b[1].t<=rt)b.shift();
+  const a=b[0];let x=a.x,y=a.y,r=a.a;
+  if(b.length>1){
+    const c=b[1],span=c.t-a.t;
+    if(rt>=c.t){
+      // starved: extrapolate briefly along the last velocity, then hold
+      const ms=Math.min(100,rt-c.t);
+      if(span>0){x=c.x+(c.x-a.x)/span*ms;y=c.y+(c.y-a.y)/span*ms}else{x=c.x;y=c.y}
+      r=c.a;
+    }else if(rt>a.t&&span>0){
+      const k=(rt-a.t)/span;
+      x=a.x+(c.x-a.x)*k;y=a.y+(c.y-a.y)*k;
+      let da=c.a-a.a;da=Math.atan2(Math.sin(da),Math.cos(da));r=a.a+da*k;
+    }
+  }
+  f.x=x;f.y=y;f.facing=r;
 }
 function netMapApply(M){
   for(let i=0;i<DYN.length&&i<M.length;i++){const r=DYN[i],v=M[i];
@@ -508,15 +573,19 @@ function netReplay(e){
 const DECAY=['muzzle','swingT','hitFlash','parryT','rdT','inv','dashCD','healT','shF','hurtT','cloakT','burnT','slowT','markT','dashT','reloadT','swingT','pingT','tagT','scanWarn','litT','fenceT','downT'];
 function netClientUpdate(dt){
   const P=G.P,fs=G.fighters;
+  const rt=performance.now()-(NET.delay||110),rtZ=rt-(NET.iv||50);   // zombies arrive every other snapshot: one extra interval of delay
   if(G.mode==='count'){G.countdown-=dt;NARR.say.tick(G.countdown);if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
   else if(G.mode==='play'||G.mode==='ending')G.time+=dt;
   for(let i=0;i<fs.length;i++){const f=fs[i];
     f.t+=dt;for(const k of DECAY)if(f[k]>0)f[k]=Math.max(0,f[k]-dt);
     if(f.zomb)f.pulse+=dt;
     if(f===P||!f.alive||f.tx===undefined)continue;
-    const dx=f.tx-f.x,dy=f.ty-f.y;
-    if(dx*dx+dy*dy>40000){f.x=f.tx;f.y=f.ty}else{const k=Math.min(1,dt*14);f.x+=dx*k;f.y+=dy*k}
-    if(f.tf!==undefined)f.facing=turnToward(f.facing,f.tf,(f.zomb?6:18)*dt);
+    if(f.sb&&f.sb.length)netInterp(f,f.zomb?rtZ:rt);
+    else{
+      const dx=f.tx-f.x,dy=f.ty-f.y;
+      if(dx*dx+dy*dy>40000){f.x=f.tx;f.y=f.ty}else{const k=Math.min(1,dt*14);f.x+=dx*k;f.y+=dy*k}
+      if(f.tf!==undefined)f.facing=turnToward(f.facing,f.tf,(f.zomb?6:18)*dt);
+    }
     if(f.dashT>0&&!f.zomb&&Math.random()<.9)G.fx.push({kind:'ghost',x:f.x,y:f.y,age:0,life:.18,col:COL.foe});
   }
   for(const b of G.bullets){b.x+=b.vx*dt;b.y+=b.vy*dt}
@@ -578,7 +647,7 @@ function netClientResults(d){
     showHUD(false);const champ=standings()[0];
     show(`<p class="eyebrow">Match over</p><h2>${champ===P?'You win the match':isAlly(champ,P)?'Your team wins the match':esc(champ.name)+' wins the match'}</h2>
       <p class="lede">You placed #${P.place} in the last drop.</p>${standingsHTML(8)}${buildHTML()}
-      <p class="lede">${NET.role==='host'?'Start another match with the same players and settings.':'Waiting for the room leader to start a rematch.'}</p><div class="row">${netEndRow()}</div>`);
+      <p class="lede" id="nlead">${NET.role==='host'?'Start another match with the same players and settings.':'Waiting for the room leader to start a rematch.'}</p><div class="row">${netEndRow()}</div>`);
     if(G.reel)setTimeout(()=>{if(G.mode==='over'&&!REEL.on)reelOpen()},900);
     return;
   }

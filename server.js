@@ -16,6 +16,7 @@ const envMs = (k, d) => { const v = +process.env[k]; return v > 0 ? v : d; };   
 const HOLD_MS = envMs('HOLD_MS', 30000);   // how long a disconnected player's slot is held for rejoin (auth mode)
 const SWEEP_MS = envMs('SWEEP_MS', 10000);   // sweeper interval
 const ROOM_MAX_AGE_MS = envMs('ROOM_MAX_AGE_MS', 6 * 3600e3);   // unstarted lobbies older than this are removed
+const LOBBY_IDLE_MS = envMs('LOBBY_IDLE_MS', 30 * 60e3);   // unstarted lobbies with no non-ping activity for this long are closed
 const newToken = () => crypto.randomBytes(16).toString('hex');
 const SLOW_BUF = envMs('SLOW_BUF', 200000);          // above this many queued bytes, stale snapshots are dropped for that socket
 const HARD_BUF = envMs('HARD_BUF', 4 * 1024 * 1024);  // above this for HARD_BUF_MS the socket is terminated
@@ -60,6 +61,12 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.
 
 const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
+  if (url === '/health') {   // cheap, no I/O: safe as the Render health check
+    let lobbies = 0, matches = 0, players = 0, held = 0;
+    for (const r of rooms.values()) { if (!r.started) lobbies++; if (r.sim) matches++; players += r.players.size; held += r.held ? r.held.size : 0; }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({ ok: true, mode: MODE, rooms: rooms.size, lobbies, matches, players, held, sockets: wss.clients.size, uptime: Math.round(process.uptime()) }));
+  }
   if (url === '/healthz') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok'); }
   if (url === '/stats') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -151,20 +158,25 @@ server.on('connection', s => s.setNoDelay(true));
 const normOrigin = s => String(s || '').trim().toLowerCase().replace(/\/+$/, '');
 const originHost = o => { try { return new URL(o).host.toLowerCase(); } catch (e) { return ''; } };
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').concat(process.env.RENDER_EXTERNAL_URL || '').map(normOrigin).filter(Boolean);
+const ORIGIN_ANY = ALLOWED_ORIGINS.includes('*');   // ALLOWED_ORIGINS=* turns the check off
+const ALLOW_LOCALHOST = process.env.ALLOW_LOCALHOST !== '0';   // default: pages served from localhost may connect (local dev on another port)
+const isLocalOrigin = o => { try { const u = new URL(o); return (u.protocol === 'http:' || u.protocol === 'https:') && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname); } catch (e) { return false; } };
 function originAllowed(origin, host) {
   if (origin == null || origin === '') return true;
   const o = normOrigin(origin);
   if (o === 'null') return false;
   const oh = originHost(o);
   if (!oh) return false;
+  if (ORIGIN_ANY) return true;
   if (host && oh === String(host).toLowerCase()) return true;
+  if (ALLOW_LOCALHOST && isLocalOrigin(o)) return true;
   return ALLOWED_ORIGINS.some(a => a === o || a === oh || originHost(a) === oh && /^https?:\/\//.test(a) && a.split('://')[0] === o.split('://')[0]);
 }
 function verifyOrigin(info, cb) {
   const origin = info.origin || (info.req && info.req.headers && info.req.headers.origin);
   if (originAllowed(origin, info.req && info.req.headers && info.req.headers.host)) return cb(true);
   console.warn('ws: rejected origin', String(origin).slice(0, 100));
-  cb(false, 403, 'Forbidden origin');
+  cb(false, 403, 'Forbidden origin: ' + String(origin).slice(0, 100) + ' is not allowed to connect to this server. The server owner can add it to the ALLOWED_ORIGINS environment variable (comma separated), or open the game from the server\'s own address.');
 }
 const wss = new WebSocketServer({ server, path: '/ws', verifyClient: verifyOrigin, maxPayload: 256 * 1024, perMessageDeflate: process.env.DEFLATE === '0' ? false : { threshold: 600, zlibDeflateOptions: { level: 1 }, serverNoContextTakeover: true, clientNoContextTakeover: true, concurrencyLimit: 10 } });
 
@@ -197,7 +209,7 @@ function roomLimited(ws) {
   return false;
 }
 
-const clean = (s, n) => String(s == null ? '' : s).replace(/[^\w \-.!?]/g, '').trim().slice(0, n);
+const clean = (s, n) => String(s == null ? '' : s).replace(/[^\w \-.!?]/g, '').replace(/ {2,}/g, ' ').trim().slice(0, n).trim();
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
 function rejoinFail(ws, msg) {
   ws.rjFails = (ws.rjFails || 0) + 1;
@@ -211,7 +223,35 @@ const GAME_PER_SEC = +(process.env.GAME_MSGS_PER_SEC || (MODE === 'auth' ? 150 :
 const JOIN_PER_10S = +(process.env.JOIN_PER_10S || 15);       // join / quick / rejoin (limits room-code guessing)
 const MAX_LOBBY_BYTES = 2048;
 const MAX_GAME_BYTES = 4096;                                   // auth mode only; relay snapshots can be large
-const MAX_DROPS = 3000;                                        // drop count after which a connection is terminated
+const MAX_DROPS = envMs('MAX_DROPS_10S', 300);                // dropped msgs allowed per 10s window before the socket is closed with an error
+const JOINS_PER_MIN = envMs('JOINS_PER_MIN', 40);              // join / quick / rejoin attempts per IP per minute (shared by all sockets on that IP)
+const ipJoins = new Map();                                     // ip -> timestamps of recent join attempts
+function joinLimited(ws) {
+  if (isLocalIp(ws.ip)) return false;
+  const now = Date.now(), arr = (ipJoins.get(ws.ip) || []).filter(t => now - t < 60000);
+  if (arr.length >= JOINS_PER_MIN) {
+    ipJoins.set(ws.ip, arr);
+    const wait = Math.max(1, Math.ceil((60000 - (now - arr[0])) / 1000));
+    send(ws, { t: 'err', msg: 'Too many join attempts from your network. Try again in ' + wait + 's.' });
+    return true;
+  }
+  arr.push(now); ipJoins.set(ws.ip, arr);
+  return false;
+}
+// Counts a dropped inbound message; closes the socket with a clear error if it keeps misbehaving.
+function noteDrop(ws, why) {
+  dropStats.total++; dropStats[why] = (dropStats[why] || 0) + 1;
+  if (ws.room) ws.room.dropped = (ws.room.dropped || 0) + 1;
+  const now = Date.now();
+  if (now - (ws.dropWin || 0) >= 10000) { ws.dropWin = now; ws.drops = 0; }
+  if (++ws.drops > MAX_DROPS && !ws.abusive) {
+    ws.abusive = true;
+    console.warn('closing abusive socket from ' + ws.ip + ' (' + ws.drops + ' dropped messages in 10s)');
+    send(ws, { t: 'err', msg: 'Disconnected: too many requests. Please reload the page.' });
+    try { ws.close(1008, 'rate limit'); } catch (e) {}
+    setTimeout(() => { try { ws.terminate(); } catch (e) {} }, 1000);
+  }
+}                                        // drop count after which a connection is terminated
 // Inbound byte budgets (1s fixed windows). A client over its own cap is dropped before it is charged to the room,
 // so a noisy client exhausts only its own allowance; the room cap bounds the total.
 const CLIENT_BYTES_PER_SEC = envMs('CLIENT_BYTES_PER_SEC', 24 * 1024);
@@ -253,11 +293,7 @@ function msgAllowed(ws, t, len) {
   }
   let why = ok ? '' : 'rate';
   if (ok) { why = byteBudget(ws, len, now); ok = !why; }
-  if (!ok) {
-    dropStats.total++; dropStats[why]++;
-    if (ws.room) ws.room.dropped = (ws.room.dropped || 0) + 1;
-  }
-  if (!ok && ++ws.drops > MAX_DROPS) { try { ws.terminate(); } catch (e) {} }
+  if (!ok) noteDrop(ws, why);
   return ok;
 }
 
@@ -266,6 +302,7 @@ const ACT_KEYS = ['a', 'd', 'h', 'm', 'r', 'u', 'z'];
 const RELAY_HOST_KINDS = ['s', 'start', 'res', 'drop'];   // relay mode: the only message kinds the host may send to peers
 const RELAY_MAX_HOST = 200000;                          // max serialized size of one host relay message (chars)
 const numIn = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
+const { validateMsg } = require('./validate');
 function cleanGameMsg(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
   if (d.k === 'i') {
@@ -394,8 +431,15 @@ function joinRoom(ws, room, name, weapon) {
   ws.p = p; ws.room = room;
   room.players.set(p.pid, p);
   if (!room.host) room.host = p.pid;
+  room.active = Date.now();
   send(ws, { t: 'joined', token: p.token, auth: room.auth, cfg: room.cfg, code: room.code, pid: p.pid, host: room.host, players: list(room), started: room.started });
   bcastPlayers(room);
+}
+// Next room leader: first player (join order) with an open socket, else first player, else 0.
+function nextHost(room) {
+  let first = 0;
+  for (const q of room.players.values()) { if (!first) first = q.pid; if (q.ws && q.ws.readyState === 1) return q.pid; }
+  return first;
 }
 function leaveRoom(ws, hold) {
   const room = ws.room, p = ws.p;
@@ -410,12 +454,17 @@ function leaveRoom(ws, hold) {
     if (!room.players.size && !room.held.size) { stopSim(room); rooms.delete(room.code); return; }
     if (p.pid === room.host) {
       if (held) room.heldHost = p.pid;   // remember a held host so they can reclaim it on rejoin
-      room.host = room.players.size ? room.players.keys().next().value : 0;
+      room.host = nextHost(room);
     }
     balanceTeams(room);
     bcastPlayers(room); return;
   }
   if (p.pid === room.host) {
+    if (!room.started && room.players.size) {   // relay lobby: no sim running yet, hand the room to the next player
+      room.host = nextHost(room);
+      balanceTeams(room); bcastPlayers(room);
+      return;
+    }
     if (hold && p.token && room.started) {   // relay host dropped mid-match: hold the room so they can rejoin
       room.held.set(p.token, { p, timer: setTimeout(() => expireHold(room, p.token), HOLD_MS) });
       room.heldHost = p.pid;
@@ -475,10 +524,19 @@ wss.on('connection', (ws, req) => {
     try { onMsg(raw); } catch (e) { console.error('message handler error', e); }
   });
   function onMsg(raw) {
-    if (++ws.msgs > 700) return;                      // flood guard
-    let m; try { m = JSON.parse(raw); } catch (e) { return; }
-    if (!m || typeof m.t !== 'string') return;
+    if (ws.abusive) return;
+    if (++ws.msgs > 700) { noteDrop(ws, 'rate'); return; }                      // flood guard
+    let m; try { m = JSON.parse(raw); } catch (e) { noteDrop(ws, 'client'); return; }
+    if (!m || typeof m.t !== 'string') { noteDrop(ws, 'client'); return; }
     if (!msgAllowed(ws, m.t, raw.length)) return;
+    const v = validateMsg(m);                         // strict per-type schema check
+    if (!v.ok) {
+      if (v.err) send(ws, { t: 'err', msg: v.err });
+      if ((ws.bad = (ws.bad || 0) + 1) > 50) { try { ws.terminate(); } catch (e) {} }
+      return;
+    }
+    m = v.msg;
+    if (ws.room && m.t !== 'ping') ws.room.active = Date.now();   // pings are sent every few seconds and must not keep a lobby alive
     const room = ws.room, p = ws.p;
     switch (m.t) {
       case 'ping': return send(ws, { t: 'pong', ts: m.ts });
@@ -491,10 +549,12 @@ wss.on('connection', (ws, req) => {
       }
       case 'join': {
         const r = rooms.get(clean(m.code, 4).toUpperCase());
+        if (joinLimited(ws)) return;
         if (!r) return send(ws, { t: 'err', msg: 'No room with that code.' });
         return joinRoom(ws, r, m.name, m.weapon);
       }
       case 'quick': {
+        if (joinLimited(ws)) return;
         let best = null;
         for (const r of rooms.values()) if (!joinBlock(r) && (!best || r.players.size > best.players.size)) best = r;
         if (!best) {
@@ -553,6 +613,7 @@ wss.on('connection', (ws, req) => {
       case 'lobby': if (room && p && p.pid === room.host) { clearHolds(room); stopSim(room); room.started = false; bcastPlayers(room); } return;
       case 'rejoin': {
         if (ws.rjFails >= MAX_REJOIN_FAILS) return;
+        if (joinLimited(ws)) return;
         const r = rooms.get(clean(m.code, 4).toUpperCase());
         const tok = typeof m.token === 'string' && /^[0-9a-f]{32}$/.test(m.token) ? m.token : null;
         if (r && !r.auth) return relayRejoin(ws, r, tok);
@@ -592,7 +653,7 @@ wss.on('connection', (ws, req) => {
         } else {
           const d = cleanGameMsg(d0);   // peers may only send input ('i') or 'ready'; payload rebuilt from a whitelist
           if (!d) return;
-          const h = room.players.get(room.host); if (h && h.ws.readyState === 1) h.ws.send(JSON.stringify({ t: 'r', from: p.pid, d }));
+          const h = room.players.get(room.host); if (h) relaySend(h, JSON.stringify({ t: 'r', from: p.pid, d }), d);
         }
         return;
       }
@@ -611,7 +672,22 @@ function sweep() {
 function sweepOnce() {
   for (const ws of wss.clients) { if (!ws.isAlive) { ws.terminate(); continue; } if (slowCheck(ws)) continue; ws.isAlive = false; try { ws.ping(); } catch (e) {} }
   const now = Date.now();                              // sweep empty / abandoned lobbies
+  for (const [ip, arr] of ipJoins) { const keep = arr.filter(t => now - t < 60000); if (keep.length) ipJoins.set(ip, keep); else ipJoins.delete(ip); }
   for (const [ip, arr] of ipRooms) { const keep = arr.filter(t => now - t < 60000); if (keep.length) ipRooms.set(ip, keep); else ipRooms.delete(ip); }
+  for (const r of [...rooms.values()]) {
+    if (r.held && r.held.size) {   // backstop for held slots whose expiry timer was lost
+      for (const [tok, h] of [...r.held]) {
+        if (!h.seen) h.seen = now;
+        if (now - h.seen > HOLD_MS + SWEEP_MS) expireHold(r, tok);
+      }
+      if (!rooms.has(r.code)) continue;   // expireHold may have removed the room
+    }
+    if (!r.started && r.players.size && now - (r.active || r.created) > LOBBY_IDLE_MS) {   // idle lobby: tell players and close
+      const socks = [...r.players.values()].map(q => q.ws);
+      closeRelayRoom(r, 'This lobby was closed after being idle for a while. Please create a new room.');
+      for (const s of socks) { try { s.close(1000, 'idle lobby'); } catch (e) {} }
+    }
+  }
   for (const [c, r] of rooms) if ((!r.players.size && !(r.held && r.held.size)) || (!r.started && now - r.created > ROOM_MAX_AGE_MS)) { clearHolds(r); stopSim(r); rooms.delete(c); }
 }
 const sweeper = setInterval(sweep, SWEEP_MS);
@@ -632,7 +708,7 @@ function shutdown(sig) {
   server.close(() => { clearTimeout(force); console.log('shutdown complete'); process.exit(0); });   // stop accepting new HTTP / WS upgrades
   for (const room of rooms.values()) { clearHolds(room); stopSim(room); }
   rooms.clear();
-  const msg = JSON.stringify({ t: 'closed', reason: 'The server is restarting for an update. Please start a new room in a moment.' });
+  const msg = JSON.stringify({ t: 'closed', restarting: true, reason: 'Server restarting for an update - your match was ended. Please start a new room in about a minute.' });
   for (const ws of wss.clients) {
     ws.room = null; ws.p = null;                       // so the close handler doesn't start rejoin holds
     try { if (ws.readyState === 1) ws.send(msg); ws.close(1001, 'server restarting'); } catch (e) { try { ws.terminate(); } catch (_) {} }

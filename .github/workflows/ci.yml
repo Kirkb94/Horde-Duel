@@ -16,6 +16,7 @@ jobs:
         run: |
           node --check server.js
           node --check sim.js
+          node --check validate.js
           for f in test/*.js; do node --check "$f"; done
           python3 -m py_compile dev/build.py
       - name: Warn about stale mp/ copy

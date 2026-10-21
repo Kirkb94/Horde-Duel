@@ -33,6 +33,7 @@ If a player drops mid-match, `MODE=auth` keeps their slot for a short time so th
 - `TICK_HZ` (default 30): server simulation rate
 - `MAX_MATCHES` (default 4 in auth mode): matches the server runs at once. Each uses roughly 15 MB and 5 to 10% of a core.
 - `MAX_ROOMS` (default 60), `DEFLATE=0` turns off WebSocket compression
+- `ALLOWED_ORIGINS`: comma-separated origins (or bare hosts) whose pages may open the WebSocket, e.g. `https://mygame.example.com,other.example.org`. Use this only if the page is hosted somewhere other than this server. Always allowed without configuring: the server's own host (same-origin), `RENDER_EXTERNAL_URL`, `http(s)://localhost`, `127.0.0.1` and `[::1]` on any port (set `ALLOW_LOCALHOST=0` to turn that off), and non-browser clients that send no Origin header. `ALLOWED_ORIGINS=*` disables the check (not recommended). A rejected handshake gets HTTP 403 with a message naming the offending origin and this variable, and the server logs `ws: rejected origin ...`. Browsers show this as a failed WebSocket connection, so check the server log or the Network tab to see the message.
 - `GET /healthz` returns `ok`. `GET /stats` shows mode, rooms, matches and the server tick time (`tickMsAvg` should stay well under 33).
 
 ## Run locally
