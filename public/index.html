@@ -992,7 +992,7 @@ function collide(f){
 const NARR=(()=>{
   const BASES=['match_start','next_drop','count_03','count_02','count_01','count_go','start_br','start_duel','start_team','start_online','zone_warning','zone_shrinking','outside_zone','zone_final','blackout_warn','blackout_end','horde_surge','hunter','surrounded','horde_growing','boss','you_eliminated','elim_storm','elim_horde','you_kill','other_elim','streak_2','streak_3','streak_5','left_10','left_05','left_03','left_02','you_down','mate_down','enemy_down','revive_give','revive_get','mate_lost','team_one_left','no_revives','drop_win','drop_lose','drop_draw','sudden','match_point','match_win','match_win_team','match_lose','rematch','zsurv_start','wave_start','wave_clear','zsurv_over'];
   // only recorded files; add new names here as mp3s land in public/audio/narrator/ (a name without _NN is a single-take line)
-  const FILES=['vo_match_start_01','vo_match_start_02','vo_count_03'];
+  const FILES=BASES.flatMap(b=>['_01','_02'].map(s=>'vo_'+b+s));
   const groups={};
   for(const n of FILES){if(BASES.includes(n.slice(3)))continue;const m=/^(.*)_(\d+)$/.exec(n);if(!m)continue;(groups[m[1]]=groups[m[1]]||[]).push(n)}
   let cur=null,last={},qd=null;
@@ -1115,7 +1115,7 @@ const VOICE=(()=>{
   const CH={pistol:'wren',revolver:'cinder'};
   const lib={};
   for(const c in MAN){const g=lib[c]={};for(const t of MAN[c].split(' ')){const m=t.split(':');if(m[1]){const a=[];for(let i=1;i<=+m[1];i++)a.push(m[0]+'_'+(i<10?'0':'')+i);g[m[0]]=a}else g[t]=[t]}}
-  const HMAP={vo_horde_surge:['callout_horde',{cd:20}],vo_zone_shrinking:['callout_zone',{cd:20,key:'zone'}],vo_zone_warning:['callout_zone',{cd:20,key:'zone'}],vo_mate_down:['callout_mate_down',{cd:10}],vo_you_down:['down_01',{pri:2}],vo_you_eliminated:['down_02',{pri:2}],vo_elim_storm:['down_02',{pri:2}],vo_elim_horde:['down_02',{pri:2}],vo_revive_give:['revive_give',{pri:2}],vo_revive_get:['revive_get',{pri:2}],vo_streak_2:['streak_01',{pri:2}],vo_streak_3:['streak_02',{pri:2}],vo_you_kill:['kill_player',{pri:2}],vo_left_02:['last_standing',{pri:2}],vo_team_one_left:['last_standing',{pri:2}],vo_match_win:['victory',{pri:2}],vo_match_win_team:['victory',{pri:2}],vo_match_lose:['defeat',{pri:2}]};
+  const HMAP={vo_horde_surge:['callout_horde',{cd:20}],vo_zone_shrinking:['callout_zone',{cd:20,key:'zone'}],vo_zone_warning:['callout_zone',{cd:20,key:'zone'}],vo_mate_down:['callout_mate_down',{cd:10}],vo_you_down:['down_01',{pri:2}],vo_you_eliminated:['down_02',{pri:2}],vo_elim_storm:['down_02',{pri:2}],vo_elim_horde:['down_02',{pri:2}],vo_revive_give:['revive_give',{pri:2}],vo_revive_get:['revive_get',{pri:2}],vo_streak_2:['streak_01',{pri:2}],vo_streak_3:['streak_02',{pri:2}],vo_you_kill:['kill_player',{pri:2}],vo_left_02:['last_standing',{pri:2}],vo_team_one_left:['last_standing',{pri:2}],vo_match_win:['victory',{pri:2}],vo_match_win_team:['victory',{pri:2}],vo_match_lose:['defeat',{pri:2}],vo_horde_growing:['callout_horde',{cd:20}],vo_surrounded:['callout_help',{cd:20}],vo_hunter:['callout_enemy',{cd:20}]};
   let cur=null,curPri=0,lastEnd=0,lastAny=0,lastStart=-99,cd={},last={},pend=[],bad={};
   let st={heal:0,hp0:0,rel:false,ab:false,low:0,sc:0,gt:0};
   const now=()=>performance.now()/1000;
@@ -1123,7 +1123,7 @@ const VOICE=(()=>{
   const busy=()=>!!(cur&&!cur.ended&&!cur.paused);
   function stop(){if(cur){try{cur.pause()}catch(e){}cur=null}}
   function play(k,o){
-    o=o||{};const c=who();if(!c||typeof SFX==='undefined'||!SFX.on)return false;
+    o=o||{};const c=o.c||who();if(!c||G.debug||G.zmode||typeof SFX==='undefined'||!SFX.on)return false;
     const keys=Array.isArray(k)?k:[k];k=keys.find(x=>lib[c][x]&&lib[c][x].some(f=>!bad[c+f]));if(!k)return false;
     const t=now(),key=o.key||k,pri=o.pri||0;
     if(o.cd&&cd[key]!==undefined&&t-cd[key]<o.cd)return false;
@@ -1148,17 +1148,44 @@ const VOICE=(()=>{
     return true;
   }
   setInterval(()=>{if(cur){if(typeof SFX==='undefined'||!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK))}},250);
-  function later(k,wait){const c=who();if(c&&lib[c][k]&&pend.length<3)pend.push({c,k,exp:now()+wait})}
+  function later(k,wait,ch){const c=ch||who();if(c&&lib[c][k]&&pend.length<4)pend.push({c,k,exp:now()+wait})}
+  // character name of a living standing teammate (2v2 only) who has recorded lines, else null
+  function allyC(){
+    if(G.debug||G.zmode||!G.P||!G.cfg||G.cfg.mode!=='team')return null;
+    const f=G.fighters.find(f=>!f.zomb&&f!==G.P&&f.alive&&!f.down&&f.team===G.P.team&&CH[f.weapon]);
+    return f?CH[f.weapon]:null;
+  }
+  // what an ally says for a narrator moment
+  const AMAP={vo_horde_surge:'callout_horde',vo_horde_growing:'callout_horde',vo_zone_shrinking:'callout_zone',vo_zone_warning:'callout_zone',vo_you_down:'callout_mate_down',vo_you_eliminated:'callout_mate_down',vo_elim_storm:'callout_mate_down',vo_elim_horde:'callout_mate_down',vo_surrounded:'callout_help',vo_hunter:'callout_enemy',vo_match_win_team:'victory',vo_match_win:'victory',vo_match_lose:'defeat'};
+  const spk={};
   // offered every narrator line; true = the character spoke instead of the narrator
   function hook(group,o){
-    const c=who();if(!c)return false;
-    if(group==='vo_match_start'){
+    if(G.debug||G.zmode||!G.P)return false;
+    const c=who(),a=allyC();
+    if(group==='vo_match_start'||group==='vo_next_drop'||group==='vo_sudden'){
+      // narrator always opens; character/ally follow up behind it
       const t=now();if(t-lastStart<15)return false;lastStart=t;
-      if(!(G.dropNo>1))later('intro',14);
-      later('match_start',14);return false;
+      if(group==='vo_match_start'){
+        if(c&&!(G.dropNo>1))later('intro',14,c);
+        if(a)later('match_start',14,a);else if(c)later('match_start',14,c);
+      }else{
+        const w=[];if(c)w.push(c);if(a)w.push(a);
+        if(w.length&&Math.random()<.6)later('match_start',14,w[Math.floor(Math.random()*w.length)]);
+      }
+      return false;
     }
-    const m=HMAP[group];if(!m||!lib[c][m[0]])return false;
-    return play(m[0],Object.assign({},m[1]));
+    // pick between your character, an ally and the narrator (never the same voice twice in a row per moment)
+    const m=HMAP[group],am=AMAP[group],opts=[];
+    if(c&&m&&lib[c][m[0]])opts.push('me');
+    if(a&&am&&lib[a][am])opts.push('ally');
+    if(!opts.length)return false;
+    opts.push('narr');
+    let k=opts[Math.floor(Math.random()*opts.length)];
+    if(k===spk[group])k=opts[(opts.indexOf(k)+1)%opts.length];
+    spk[group]=k;
+    if(k==='narr')return false;
+    if(k==='me')return play(m[0],Object.assign({c},m[1]));
+    return play(am,Object.assign({c:a},m?m[1]:{pri:1}));
   }
   function hurt(amt){
     if(!G.P||!who())return;
@@ -1173,10 +1200,10 @@ const VOICE=(()=>{
   }
   function tick(dt){
     const P=G.P,c=who(),t=now();if(!c)return;
-    if(G.time<st.gt-.5){st={heal:0,hp0:0,rel:false,ab:false,low:0,sc:0,gt:0};pend.length=0}
+    if(G.time<st.gt-.5){st={heal:0,hp0:0,rel:false,ab:false,low:0,sc:0,gt:0}}
     st.gt=G.time;if(!lastAny)lastAny=t;
-    while(pend.length&&(pend[0].c!==c||t>pend[0].exp))pend.shift();
-    if(pend.length&&!busy()&&!NARR.busy()){const p=pend.shift();play(p.k,{nogap:1,key:'q_'+p.k})}
+    while(pend.length&&((pend[0].c!==c&&pend[0].c!==allyC())||t>pend[0].exp))pend.shift();
+    if(pend.length&&!busy()&&!NARR.busy()){const p=pend.shift();play(p.k,{c:p.c,nogap:1,key:'q_'+p.k})}
     if(P.down)return;
     const healing=P.healT>0;
     if(healing&&!st.heal){st.heal=1;st.hp0=P.hp}
@@ -1581,10 +1608,10 @@ function kbAction(e){
     return false;
   }
   if(G.spectating&&G.mode==='play'&&!G.debug){if(c==='ArrowLeft'){pickSpec(-1);return true}if(c==='ArrowRight'){pickSpec(1);return true}if(has('dash')){specSpeed();e.preventDefault();return true}}
-  if(has('band'))healQueued='band';
-  if(has('kit'))healQueued='kit';
-  if(has('dash')){dashQueued=true;e.preventDefault()}
-  if(has('ability'))abQueued=true;
+  if(has('band')){healQueued='band';if(!e.repeat)healWhyToast('band')}
+  if(has('kit')){healQueued='kit';if(!e.repeat)healWhyToast('kit')}
+  if(has('dash')){dashQueued=true;e.preventDefault();if(!e.repeat)cdWhyToast('dash')}
+  if(has('ability')){abQueued=true;if(!e.repeat)cdWhyToast('ab')}
   if(has('zoom')&&!e.repeat)zoomQueued=true;
   if(has('interact')&&!e.repeat&&!G.debug)useQueued=true;
   if(has('pause'))togglePause();
@@ -1653,7 +1680,7 @@ function pfInit(){pfBindPanel();PLAT.auto=pfDetectPC();pfLoad();pfApply();SFX.se
 cv.addEventListener('pointerdown',e=>{
   if(G.molo>0&&G.mode==='play'&&G.P&&G.P.alive&&!G.spectating){e.preventDefault();throwMolo(e.clientX,e.clientY);return}
   if(G.spectating&&G.mode==='play'){e.preventDefault();const sb=(G.specBtns||[]).find(b=>e.clientX>=b.x&&e.clientX<=b.x+b.w&&e.clientY>=b.y&&e.clientY<=b.y+b.h);if(sb){sb.f();return}pickSpec(e.clientX<innerWidth/2?-1:1);return}
-  if(e.pointerType==='mouse'){pfSeen(true);if(e.button===2){if(!G.debug&&!G.spectating)abQueued=true;return}if(e.button!==0)return;mouse.down=true;mouse.x=e.clientX;mouse.y=e.clientY;return}
+  if(e.pointerType==='mouse'){pfSeen(true);if(e.button===2){if(!G.debug&&!G.spectating){abQueued=true;cdWhyToast('ab')}return}if(e.button!==0)return;mouse.down=true;mouse.x=e.clientX;mouse.y=e.clientY;return}
   pfSeen(false);e.preventDefault();
   if(!phoneUI())return;
   const bm=stickBase('move'),ba=stickBase('aim'),dm=Math.hypot(e.clientX-bm.x,e.clientY-bm.y),da=Math.hypot(e.clientX-ba.x,e.clientY-ba.y),zone=STICK_R*1.8;
@@ -1687,10 +1714,17 @@ addEventListener('keydown',e=>{keys.add(e.code);if(kbAction(e))return;if(G.debug
 addEventListener('keyup',e=>keys.delete(e.code));
 const ZM=document.getElementById('zmBtn');
 ZM.addEventListener('pointerdown',e=>{e.preventDefault();if(!G.debug&&!G.spectating)zoomQueued=true});
-$('#abBtn').addEventListener('pointerdown',e=>{e.preventDefault();if(G.debug)G.dbgMode=(G.dbgMode+1)%3;else if(!G.spectating)abQueued=true});
-$('#dashBtn').addEventListener('pointerdown',e=>{e.preventDefault();if(G.debug)cycleSpeed();else if(G.spectating){if(NET.m)pickSpec(1);else G.ff=!G.ff}else dashQueued=true});
-const healBtn=(id,k)=>$(id).addEventListener('pointerdown',e=>{e.preventDefault();if(!G.debug&&!G.spectating)healQueued=(G.P.healT>0&&G.P.healKind!==k)?null:k});
+$('#abBtn').addEventListener('pointerdown',e=>{e.preventDefault();if(G.debug)G.dbgMode=(G.dbgMode+1)%3;else if(!G.spectating){abQueued=true;cdWhyToast('ab')}});
+$('#dashBtn').addEventListener('pointerdown',e=>{e.preventDefault();if(G.debug)cycleSpeed();else if(G.spectating){if(NET.m)pickSpec(1);else G.ff=!G.ff}else{dashQueued=true;cdWhyToast('dash')}});
+function healWhy(k){const P=G.P;if(!P||!P.alive)return null;if(P.down)return "You're down, wait for a revive";if(!(P[k]>0))return k==='band'?'No bandages, find one on the map':'No med kits, find one on the map';if(P.hp>=mhp(P)-.5&&!(P.healT>0&&P.healKind===k))return 'Already at full health';return null}
+let _toastEl=null,_toastT=0,_toastHide=0;
+function toastWhy(msg){const now=performance.now();if(now-_toastT<400)return;_toastT=now;if(!_toastEl){_toastEl=document.createElement('div');_toastEl.setAttribute('role','status');_toastEl.style.cssText='position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 30vh);transform:translateX(-50%);max-width:90vw;padding:8px 14px;border-radius:8px;background:rgba(10,12,14,.92);border:1px solid #ffd24a;color:#fff;font:600 14px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;z-index:50;transition:opacity .2s';document.body.appendChild(_toastEl)}_toastEl.textContent=msg;_toastEl.style.opacity='1';clearTimeout(_toastHide);_toastHide=setTimeout(()=>{_toastEl.style.opacity='0'},1600)}
+function healWhyToast(k){if(G.mode!=='play'||G.debug||G.spectating)return;const w=healWhy(k);if(w)toastWhy(w)}
+const healBtn=(id,k)=>$(id).addEventListener('pointerdown',e=>{e.preventDefault();if(!G.debug&&!G.spectating){healWhyToast(k);healQueued=(G.P.healT>0&&G.P.healKind!==k)?null:k}});
 healBtn('#bandBtn','band');healBtn('#kitBtn','kit');
+function cdWhy(k){const P=G.P;if(!P||!P.alive)return null;if(P.down)return "You're down, wait for a revive";if(k==='dash'){return P.dashCD>0?'Dash ready in '+Math.ceil(P.dashCD)+'s':null}if(P.abCD>0&&!(P.abCh>0)){const c=CHARS[P.weapon];return (c&&c.ab?c.ab:'Ability')+' ready in '+Math.ceil(P.abCD)+'s'}return null}
+function cdWhyToast(k){if(G.mode!=='play'||G.debug||G.spectating)return;const w=cdWhy(k);if(w)toastWhy(w)}
+healBtn_cd_ready=true;
 $('#pauseBtn').addEventListener('click',togglePause);
 $('#useBtn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();useQueued=true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&!NET.m&&(G.mode==='play'||G.mode==='count'))togglePause();if(document.hidden)clearSticks()});
@@ -2958,10 +2992,36 @@ function resetMatch(){
   G.debug=false;G.zmode=false;G.dropNo=1;G.drawN=0;G.draw=false;G.sudden=false;G.winner=null;G.ff=false;
   G.pending=0;G.afterPick=false;G.zKills=0;G.zid=0;G.wave=0;G.hzT=0;G.hzN=0;
 }
+// ---------- Daily challenge ----------
+function dailyKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function dailyDef(){
+  const key=dailyKey();let h=2166136261;for(let i=0;i<key.length;i++)h=Math.imul(h^key.charCodeAt(i),16777619);
+  const mix=x=>{x=Math.imul(x^(x>>>15),2246822519);x=Math.imul(x^(x>>>13),3266489917);return (x^(x>>>16))>>>0};
+  const mk=Object.keys(MAPS),mods=Object.keys(MODS);
+  return{key,map:mk[mix(h+1)%mk.length],weapon:WKEYS[mix(h+2)%WKEYS.length],mod:mods[mix(h+3)%mods.length]};
+}
+function dailyStore(){try{return JSON.parse(localStorage.getItem('hordedaily')||'{}')||{}}catch(e){return {}}}
+function dailyBest(key){const v=dailyStore()[key];return v>0?v:0}
+function dailyLabel(){const d=dailyDef(),b=dailyBest(d.key);return 'Daily challenge · '+MAPS[d.map].name+' · '+CHARS[d.weapon].name+' · '+MODS[d.mod][0]+(b?' · best '+b:'')}
+function startDaily(){G.daily=dailyDef();G.dScore=0;G.dNew=false;startMatch()}
+// points per finished drop: 10 per kill, 5 per place beaten, 50 for winning the drop
+function dailyScore(won,final){
+  if(!G.daily||G.zmode||G.debug||NET.m)return;
+  const P=G.P,pl=won?1:(P.place||N_FIGHT);
+  G.dScore=(G.dScore||0)+P.dropKills*10+Math.max(0,N_FIGHT-pl)*5+(won?50:0);
+  if(final){
+    const s=dailyStore(),b=s[G.daily.key]||0;G.dNew=G.dScore>b;
+    if(G.dNew){s[G.daily.key]=G.dScore;const ks=Object.keys(s).sort();while(ks.length>30)delete s[ks.shift()];try{localStorage.setItem('hordedaily',JSON.stringify(s))}catch(e){}}
+  }
+}
+function dailyHTML(){
+  if(!G.daily)return '';
+  return '<p class="lede"><b>Daily challenge '+G.daily.key+'</b> · score <b>'+G.dScore+'</b>'+(G.dNew?' · new best!':' · best '+dailyBest(G.daily.key))+'</p>';
+}
 function startMatch(){
-  resetMatch();G.debug=false;G.zmode=false;G.fighters=[];setMap(pickMap());
-  const mc=setupMode({mode:G.gmode,n:G.gsize,mods:G.mods||[]});
-  for(let i=0;i<N_FIGHT;i++){const f=makeFighter(i,i===0?G.pick:WKEYS[Math.floor(Math.random()*WKEYS.length)]);if(mc.mode==='team')f.team=i<2?0:1;G.fighters.push(f)}
+  resetMatch();G.debug=false;G.zmode=false;G.fighters=[];setMap(G.daily?G.daily.map:pickMap());
+  const mc=G.daily?(G.dScore=0,setupMode({mode:'br',n:8,mods:[G.daily.mod]})):setupMode({mode:G.gmode,n:G.gsize,mods:G.mods||[]});
+  for(let i=0;i<N_FIGHT;i++){const f=makeFighter(i,i===0?(G.daily?G.daily.weapon:G.pick):WKEYS[Math.floor(Math.random()*WKEYS.length)]);if(mc.mode==='team')f.team=i<2?0:1;G.fighters.push(f)}
   G.P=G.fighters[0];G.dropNo=1;startDrop();NARR.say('vo_start_'+mc.mode,{queue:true});
   try{if(!localStorage.getItem('hordemarkers')){localStorage.setItem('hordemarkers','1');feedAdd('Green corners mark buildings, green dots mark doorways',true)}}catch(e){}
   try{if(!localStorage.getItem('hordearmor')){localStorage.setItem('hordearmor','1');feedAdd('Blue shield icons on the map are armor pickups (+50 armor)',true)}}catch(e){}
@@ -3348,6 +3408,7 @@ function dropResults(){
   if(G.debug){debugResults();return}
   const P=G.P,final=G.fighters.some(f=>f.wins>=WIN_DROPS),won=!G.draw&&(G.winner===P||isAlly(G.winner,P));
   if(final)G.pending=0;else if(G.pending>0){G.afterPick=true;openLevelPick();return}
+  dailyScore(won,final);
   const line=G.draw?'Draw, no win awarded':won?(G.cfg.mode==='team'?'Your team won':'Last one standing'):`You placed #${P.place} of ${N_FIGHT} with ${P.dropKills} kill${P.dropKills===1?'':'s'}`;
   if(final){
     G.mode='over';showHUD(false);
@@ -3355,7 +3416,7 @@ function dropResults(){
     {const mine=champ===P||isAlly(champ,P);NARR.say(mine?(G.cfg.mode==='team'?'vo_match_win_team':'vo_match_win'):'vo_match_lose',{force:true});NARR.say('vo_rematch',{queue:true})}
     if(champ===P||isAlly(champ,P)){achUnlock('firstwin');if(P.wins>=G.dropNo)achUnlock('flawless')}
     show(`<p class="eyebrow">Match over · ${cap(G.diff)} bots</p><h2>${champ===P||isAlly(champ,P)?(champ===P?'You win the match':'Your team wins the match'):champ.name+' wins the match'}</h2>
-      <p class="lede">Drop ${G.dropNo}: ${line}.</p>${standingsHTML(8)}${buildHTML()}
+      <p class="lede">Drop ${G.dropNo}: ${line}.</p>${dailyHTML()}${standingsHTML(8)}${buildHTML()}
       <div class="row"><button class="go" data-act="again">Rematch</button>${reelGet()?'<button class="go ghost" data-act="reel">Highlights</button>':''}<button class="go ghost" data-act="menu">Change setup</button></div>`);
     if(G.reel)setTimeout(()=>{if(G.mode==='over'&&!REEL.on)reelOpen()},900);
   }else{
@@ -3424,7 +3485,7 @@ function hide(){ov.hidden=true}
 function showHUD(on){const h=$('#hud');h.hidden=!on;if(!on)ZM.hidden=true;$('#bandBtn').hidden=!on;$('#kitBtn').hidden=!on;$('#abBtn').hidden=!on;$('#dashBtn').hidden=!on;if(on)hudBottom=h.getBoundingClientRect().bottom}
 function modeNote(){return G.gmode==='duel'?'1v1: a small arena, a light zombie horde, first to 3 round wins.':G.gmode==='team'?'2v2: you and a bot ally against two bots. Allies cannot hurt each other. Lethal damage downs you instead while a teammate lives: stand still beside a downed ally to revive them. First team to 3 round wins.':'Last one alive wins the drop. First to 3 drop wins takes the match.'}
 function menu(){
-  G.mode='menu';G.P=null;showHUD(false);
+  G.mode='menu';G.P=null;G.daily=null;showHUD(false);
   show(`<p class="eyebrow">Battle royale · 1v1 · 2v2 · you vs the bots</p>
   <h1>Horde <em>Duel</em></h1>
   <p class="lede">Drop onto a 4,000-unit map. You only see what your cone lights up, and distant gunfire shows as pings. A slow horde of zombies waits on the edge of the zone and shuffles toward the middle. Last one alive wins the drop, and your upgrades carry through every drop.</p>
@@ -3436,6 +3497,7 @@ function menu(){
   <div class="group"><span class="glabel">Modifiers · solo matches only</span><div class="seg" style="grid-template-columns:repeat(2,1fr)">${Object.entries(MODS).map(([k,m])=>`<button data-act="mod" data-v="${k}" title="${m[1]}" aria-pressed="${(G.mods||[]).includes(k)}">${m[0]}<br><small>${m[1]}</small></button>`).join('')}</div></div>
   <div class="group"><span class="glabel">Choose your character</span><div class="weps">${Object.entries(WEAPONS).map(([k,w])=>{const c=CHARS[k];return `<button class="wep" data-act="wep" data-v="${k}" aria-pressed="${G.pick===k}" style="border-left:4px solid ${CPAL[k].acc}"><span class="wrole" style="color:${CPAL[k].acc}">${c.role} · ${w.name}</span><span class="wname">${c.name}</span><span class="wab"><b>${c.ab}.</b> ${c.desc}</span><span class="wstat">${w.n>1?w.damage+'×'+w.n:w.damage} dmg · ${w.rate}/s · ${k==='sword'?'∞':w.clip} rounds · ${c.hpMax} HP · move ${Math.round(c.spd*100)}% · ${c.cd}s ${k==='smg'?'per mine':'ability'}</span></button>`}).join('')}</div></div>
   <div class="pfoot"><button class="go" data-act="start">Start match</button></div>
+  <button class="go ghost" data-act="daily">${dailyLabel()}</button>
   <button class="go ghost" data-act="online">Play online · up to 16 players</button>
   <button class="go ghost" data-act="mute">Sound: ${SFX.on?'on':'off'}</button>
   <button class="go ghost" data-pf="settings-menu">Settings · Controls</button>
@@ -3493,6 +3555,7 @@ panel.addEventListener('click',e=>{
     case 'mute':SFX.init();SFX.toggle();b.textContent='Sound: '+(SFX.on?'on':'off');break;
     case 'zombies':startZombies();break;
     case 'online':netMenu();break;
+    case 'daily':startDaily();break;
     case 'n_quick':case 'n_create':case 'n_join':case 'n_start':case 'n_leave':case 'n_lobby':case 'n_rematch':case 'n_mode':case 'n_map':case 'n_team':netAct2(b.dataset.act,v);break;
     case 'dbgnext':for(const f of G.fighters)aiPick(f);G.dropNo++;startDrop();break;
     case 'resume':togglePause();break;
@@ -4500,7 +4563,7 @@ function updateHUD(){
   else{E.ab.style.setProperty('--cd',G.debug?0:(P.abCD/abCdMax(P)).toFixed(3));E.ab.classList.toggle('rdy',G.debug||P.abCD<=0||P.abCh>0)}
   {const hv=!ov.hidden||(G.spectating&&!G.debug)||G.debug;E.bandB.hidden=hv;E.kitB.hidden=hv;
     for(const [el,k,nm] of [[E.bandB,'band','BANDAGE'],[E.kitB,'kit','MED KIT']]){const key=k+P[k];if(el._k!==key){el._k=key;el.innerHTML=nm+'<b class="cnt">'+P[k]+'</b>'}
-      el.style.setProperty('--cd',(P.healT>0&&P.healKind===k?P.healT/Math.max(.01,P.healMax):0).toFixed(3));el.classList.toggle('empty',!(P[k]>0));el.classList.toggle('off',!(P[k]>0)||(P.hp>=mhp(P)-.5&&!(P.healT>0&&P.healKind===k)));el.classList.toggle('need',P[k]>0&&P.hp<mhp(P)*.6&&!(P.healT>0)&&!P.down)}}
+      el.style.setProperty('--cd',(P.healT>0&&P.healKind===k?P.healT/Math.max(.01,P.healMax):0).toFixed(3));el.classList.toggle('empty',!(P[k]>0));el.title=healWhy(k)||'';el.classList.toggle('off',!(P[k]>0)||(P.hp>=mhp(P)-.5&&!(P.healT>0&&P.healKind===k)));el.classList.toggle('need',P[k]>0&&P.hp<mhp(P)*.6&&!(P.healT>0)&&!P.down)}}
   E.alive.textContent=aliveCount();E.drop.textContent=G.zmode?`Wave ${G.wave}`:`Drop ${G.dropNo}`;
   E.kills.textContent=`${P.dropKills} kill${P.dropKills===1?'':'s'} · ${P.zk||0} zombies`;E.wins.textContent=G.zmode?'Survive':`${P.wins} win${P.wins===1?'':'s'}`;
   const s=Math.max(0,Math.ceil(st.left));
