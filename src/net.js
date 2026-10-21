@@ -16,7 +16,20 @@ const fById=id=>id==null?null:(id<N_FIGHT?G.fighters[id]:NET.zm.get(id))||null;
 const SIM=window.__SIM||null;   // set when the simulation runs inside the server (server-authoritative mode)
 const netSend=o=>{if(NET.ws&&NET.ws.readyState===1)NET.ws.send(JSON.stringify(o))};
 const netRel=(to,d)=>{if(SIM){SIM.rel(to,d);return}netSend({t:'r',to,d})};
+function netFixSrv(v){
+  v=String(v||'').trim();if(!v)return'';
+  if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(v))v=(location.protocol==='http:'?'ws://':'wss://')+v;
+  v=v.replace(/^http:\/\//i,'ws://').replace(/^https:\/\//i,'wss://');
+  try{
+    const x=new URL(v);
+    if(x.protocol!=='ws:'&&x.protocol!=='wss:')return'';
+    if(location.protocol==='https:'&&x.protocol==='ws:'&&!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(x.hostname))x.protocol='wss:';
+    if(x.pathname===''||x.pathname==='/')x.pathname='/ws';
+    return x.toString();
+  }catch(e){return''}
+}
 function netUrl(){let u='';try{u=localStorage.getItem('hordeserver')||''}catch(e){}
+  u=netFixSrv(u);
   if(u)return u;
   if(location.protocol==='http:'||location.protocol==='https:')return(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws';
   return'ws://localhost:3000/ws';}
@@ -69,12 +82,27 @@ setInterval(()=>{
         if(performance.now()-NET.modeSince>6000&&performance.now()-NET.lastSnap>6000){NET.modeSince=0;netDropped('Lost connection to the server (no game updates).');return}
       }else NET.modeSince=0;
     }
-    netSend({t:'ping',ts:Date.now()})
+    netPingSent()
   }
 },2000);
+// Force an immediate token rejoin (auth mode) after tab sleep / network switch. Server answers with a full resync.
+let netHidAt=0,netForceAt=0;
+function netForceRejoin(why){
+  const t=Date.now();if(t-netForceAt<1500)return false;
+  if(SIM||NET.wake||!NET.auth||!(NET.live||NET.code))return false;
+  const s=netSess();if(!s||s.rel)return false;
+  netForceAt=t;
+  if(NET.reco){const R=NET.reco;clearTimeout(R.tm);if(!NET.ws||NET.ws.readyState!==1){if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netRecoTry()}return true}
+  if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}
+  NET.reco={t0:t,n:0,tm:0,keep:1};NET.status='';NET.rx=t;netRecoTry();return true;
+}
+addEventListener('online',()=>netForceRejoin('online'));
+addEventListener('pageshow',e=>{if(e.persisted)netForceRejoin('pageshow')});
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden)return;
+  if(document.hidden){netHidAt=Date.now();return}
   const ws=NET.ws,t=Date.now();
+  const slept=netHidAt&&t-netHidAt>2500;netHidAt=0;
+  if(slept||!ws||ws.readyState!==1){if(netForceRejoin('visible'))return}
   if(NET.reco||NET.wake){NET.rx=t;return}
   if(ws&&ws.readyState>=2){netDropped('Lost connection to the server.');return}
   if(ws&&ws.readyState===1&&t-(NET.rx||0)>4000){
@@ -161,8 +189,8 @@ function netMsgInner(m){
     case'hostlost':if(NET.m==='client')feedAdd('Host connection lost - waiting up to '+Math.round((m.ms||30000)/1000)+'s for them to return',false);break;
     case'hostback':if(NET.m==='client')feedAdd('Host is back',false);break;
     case'closed':netRecoStop();netSessClear();NET.code='';NET.role=null;if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netCleanup();NET.notice=m.restarting?'Server restarting for an update. Your match was ended - start a new room in about a minute.':(m.reason||'The room was closed.');netMenu();break;
-    case'err':if(NET.reco){if(m.rejoin===false)netRecoFail(m.msg);else{if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netRecoNext()}break}if(m.rejoin===false)netSessClear();NET.status='';NET.notice=m.msg||'Error';if(NET.code)netLobby();else netMenu();break;
-    case'pong':NET.rtt=Math.max(0,Date.now()-m.ts);NET.lag=Math.min(.12,NET.rtt/2000+.03);break;
+    case'err':if(m.code==='full'){m.msg='Server full: no free rooms right now. Try again in a minute, or join a friend with their room code.'}if(NET.reco){if(m.rejoin===false)netRecoFail(m.msg);else{if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}netRecoNext()}break}if(m.rejoin===false)netSessClear();NET.status='';NET.notice=m.msg||'Error';if(NET.code)netLobby();else netMenu();break;
+    case'pong':NET.rtt=Math.max(0,Date.now()-m.ts);NET.lag=Math.min(.12,NET.rtt/2000+.03);netPongGot(m.ts,NET.rtt);break;
     case'r':netRecv(m.from,m.d);break;
   }
 }
@@ -181,6 +209,7 @@ function netRecvInner(from,d){
     else if(d.k==='ready'){const c=NET.cl[from];if(!c||G.mode!=='between'||NET.ready[from])return;
       if(Array.isArray(d.picks))for(const p of d.picks.slice(0,8))if(Array.isArray(p)&&UP[p[0]])applyUpgrade(c.f,p[0],1);
       c.f.pend=0;NET.ready[from]=true;netHostCheckNext()}
+    else if(d.k==='rs'){const c=NET.cl[from];if(c)c.needFull=true}
     return;
   }
   if(NET.m==='client'||d.k==='start'){
@@ -204,14 +233,14 @@ function netMenu(){
   <div class="group"><span class="glabel">Choose your character</span>${wepGrid()}</div>
   <button class="go" data-act="n_quick">Quick play</button>
   <button class="go ghost" data-act="n_create">Create a room</button>
-  <div class="group"><span class="glabel">Join a friend's room</span><div class="nrow"><input class="nin" id="nCode" maxlength="4" placeholder="CODE" autocomplete="off" style="text-transform:uppercase;letter-spacing:.3em;text-align:center"><button class="go" data-act="n_join">Join</button></div></div>
-  <details class="how"><summary>Server address</summary><input class="nin" id="nSrv" placeholder="Leave empty to use this site" value="${esc(srv)}" autocomplete="off"><p class="lede">Only change this if you host the server somewhere else, e.g. wss://your-app.onrender.com/ws</p></details>
+  <div class="group"><span class="glabel">Join a friend's room</span><div class="nrow"><input class="nin" id="nCode" maxlength="6" placeholder="CODE" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" inputmode="text" style="text-transform:uppercase;letter-spacing:.3em;text-align:center"><button class="go" data-act="n_join">Join</button></div></div>
+  <details class="how"><summary>Server address</summary><input class="nin" id="nSrv" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Leave empty to use this site" value="${esc(srv)}" autocomplete="off"><p class="lede">Only change this if you host the server somewhere else, e.g. wss://your-app.onrender.com/ws</p></details>
   <button class="go ghost" data-act="menu">Back to solo menu</button>`);
 }
 function netReadForm(){
   const n=$('#nName'),s=$('#nSrv');
   if(n){NET.name=n.value.replace(/[^\w \-.!?]/g,'').trim().slice(0,14);try{localStorage.setItem('hordename',NET.name)}catch(e){}}
-  if(s){try{localStorage.setItem('hordeserver',s.value.trim())}catch(e){}}
+  if(s){try{localStorage.setItem('hordeserver',netFixSrv(s.value))}catch(e){}}
 }
 function netCap(){const c=NET.cfg;return c.mode==='duel'?2:c.mode==='team'?4:c.size}
 function netSizeChange(v){if(NET.role==='host'){NET.cfg.size=v;const e=$('#nsizeV');if(e)e.textContent=v;clearTimeout(netSizeChange.t);netSizeChange.t=setTimeout(()=>netSend({t:'cfg',mode:NET.cfg.mode,size:v,map:NET.cfg.map}),150)}}
@@ -241,7 +270,7 @@ function netAct2(act,v){
   switch(act){
     case'n_quick':netReadForm();NET.notice='';netConnect(()=>netSend({t:'quick',name:NET.name,weapon:G.pick}));break;
     case'n_create':netReadForm();NET.notice='';netConnect(()=>netSend({t:'create',name:NET.name,weapon:G.pick}));break;
-    case'n_join':{netReadForm();const c=($('#nCode').value||'').trim().toUpperCase();if(c.length!==4){NET.notice='Enter the 4 letter room code.';netMenu();break}NET.notice='';netConnect(()=>netSend({t:'join',code:c,name:NET.name,weapon:G.pick}));break}
+    case'n_join':{netReadForm();const c=($('#nCode').value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');if(c.length!==4){NET.notice='Enter the 4 letter room code.';netMenu();break}NET.notice='';netConnect(()=>netSend({t:'join',code:c,name:NET.name,weapon:G.pick}));break}
     case'n_start':if(NET.role==='host'&&NET.players.length){if(NET.auth)netSend({t:'start',diff:G.diff});else{netSend({t:'start'});netHostStart()}}break;
     case'n_leave':netLeave();break;
     case'n_lobby':netSend({t:'lobby'});break;
@@ -296,6 +325,7 @@ function netRejoin(pid){
 }
 function netResync(pid){
   if(!NET.cl[pid])return false;
+  NET.cl[pid].needFull=true;
   netRel(pid,{k:'start',ros:netRoster(),cfg:G.cfg,diff:G.diff,drop:netDropInfo()});return true;
 }
 function netBotify(pid){
@@ -393,14 +423,14 @@ function netSnapFor(c){
   const F=[];
   for(let i=0;i<N_FIGHT;i++){const o=fs[i];if(o===f)continue;const dx=o.x-cx,dy=o.y-cy;
     if(dx*dx+dy*dy<R2)F.push([i,o.alive?1:0,1,...enc(o,FK)]);else F.push([i,o.alive?1:0,0,Math.round(o.x),Math.round(o.y),Math.round(o.hp),q2(o.tagT||0),o.tagBy==null?-1:o.tagBy])}
-  c.n=(c.n||0)+1;
+  c.n=(c.n||0)+1;c.sn=(c.sn||0)+1;const full=!!c.needFull||c.n%75===0;c.needFull=false;
   let Z;
-  if(c.n%2===0){Z=[];const ZR2=780*780;
+  if(full||c.n%2===0){Z=[];const ZR2=780*780;
     for(let i=N_FIGHT;i<fs.length;i++){const z=fs[i];if(!z.zomb||!z.alive)continue;const dx=z.x-cx,dy=z.y-cy;
       if(dx*dx+dy*dy<ZR2)Z.push(z.id*8+Math.max(0,ZKS.indexOf(z.zk)),Math.round(z.x),Math.round(z.y),Math.round(z.facing*10),Math.max(1,Math.round(z.hp/z.zhp*100))+101*Math.min(1,Math.round(z.hitFlash*10))+202*Math.min(3,Math.round(z.swingT*10)))}}
   const B=[];for(const b of G.bullets){const dx=b.x-cx,dy=b.y-cy;if(dx*dx+dy*dy<1000*1000)B.push([b.owner.id,Math.round(b.x),Math.round(b.y),Math.round(b.vx),Math.round(b.vy),Math.round(b.r*10),b.expl?1:0])}
-  let O;if(c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
-  let M;if(c.n%4===3||c.n<3||c.mapv!==MAPV)M=(c.mapv=MAPV,DYN).map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
+  let O;if(full||c.n%4===1){O=[];for(const o of G.orbs){const dx=o.x-cx,dy=o.y-cy;if(dx*dx+dy*dy<1100*1100)O.push([Math.round(o.x),Math.round(o.y),Math.round(o.t%100),Math.max(0,ITM.indexOf(o.item))])}}
+  let M;if(full||c.n%4===3||c.n<3||c.mapv!==MAPV)M=(c.mapv=MAPV,DYN).map(r=>r.x<0?(r.door&&r.broken?-1:0):Math.max(1,Math.ceil(r.hp)));
   const D=[];for(const d of G.deploys){const dx=d.x-cx,dy=d.y-cy;if(dx*dx+dy*dy>1100*1100)continue;
     const o={};for(const k in d){const v=d[k];if(k==='owner')o.oid=v.id;else if(typeof v==='number')o[k]=q2(v);else if(typeof v==='string'||typeof v==='boolean')o[k]=v}D.push(o)}
   const E=[];const from=Math.max(0,c.evi-NET.evBase);
@@ -408,7 +438,7 @@ function netSnapFor(c){
     if(e.only&&e.only.indexOf(f.id)<0)continue;
     if(!e.all&&(e.x-cx)*(e.x-cx)+(e.y-cy)*(e.y-cy)>1500*1500)continue;E.push(e)}
   c.evi=NET.evBase+NET.ev.length;
-  return{k:'s',ak:c.ak,T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,M,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
+  return{k:'s',sn:c.sn,ak:c.ak,T:q2(G.time),m:MODEC[G.mode]||0,cd:q2(G.countdown),et:q2(G.endT),w:G.winner?G.winner.id:-1,me:[f.alive?1:0,...enc(f,FK),...enc(f,XK)],F,Z,B,O,M,D,bo:G.bo?[G.bo.s,q2(G.bo.t)]:0,E:E.length>70?E.slice(-70):E};
 }
 function netHostTick(dt){
   if(!NET.live)return;
@@ -423,7 +453,7 @@ function netHostTick(dt){
 }
 // ---------- client ----------
 function netOnStart(d){
-  NET.m='client';NET.live=true;NET.acts=[];NET.hist=[];NET.snapArr=0;NET.iv=0;NET.jit=0;NET.delay=0;NET.zm.clear();NET.paused=false;NET.gotSnap=false;
+  NET.m='client';NET.live=true;NET.acts=[];NET.hist=[];NET.snapArr=0;NET.iv=0;NET.jit=0;NET.delay=0;NET.zm.clear();NET.paused=false;NET.gotSnap=false;NET.lastSn=0;
   G.debug=false;G.zmode=false;if(DIFF[d.diff])G.diff=d.diff;G.fighters=[];setupMode(d.cfg);
   d.ros.forEach((r,i)=>{const f=makeFighter(i,r[2]);f.name=r[1];f.pid=r[0];f.isAI=r[0]!==NET.pid;if(r[3]>=0)f.team=r[3];f.pend=0;f.tx=f.x;f.ty=f.y;f.tf=0;G.fighters.push(f);if(r[0]===NET.pid)NET.my=i});
   G.P=G.fighters[NET.my];G.P.isAI=false;G.dropNo=1;
@@ -436,12 +466,13 @@ function netApplyDrop(d){
   fs.forEach((f,i)=>{f.ups=d.ups[i]||{};computeStats(f);Object.assign(f,{alive:true,hp:mhp(f),place:0,dropKills:0,ammo:f.st.clip,reloadT:0,dashT:0,jumpT:0,healT:0,shield:0,cloakT:0,burnT:0,slowT:0,markT:0,armor:0,band:0,kit:0,pend:0,down:0,downT:0,revP:0,finP:0,tagT:0,zoom:0,zoomK:0,litT:0,fenceT:0,fenceN:0,x:d.pos[i][0],y:d.pos[i][1],facing:d.pos[i][2],mv:{x:0,y:0},wantFire:false,vx:0,vy:0});
     f.tx=f.x;f.ty=f.y;f.tf=f.facing;f.sb=null});
   if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sudden=!!d.su;G.draw=false;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;boReset();G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
-  G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.snapArr=0;NET.hist=[];NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
+  G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.lastSn=0;NET.snapArr=0;NET.hist=[];NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
   SFX.drop();NARR.say(G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start',{force:true});G.mode='count';G.countdown=3.2+NARR.lead();hide();showHUD(true);
 }
 function netApplySnap(d){
   if(!NET.live||NET.m!=='client'||!G.P)return;
   const P=G.P,fs=G.fighters,now=performance.now();netJitter(now);NET.lastSnap=now;NET.gotSnap=true;
+  if(typeof d.sn==='number'){if(NET.lastSn&&d.sn>NET.lastSn+1&&now-(NET.rsT||0)>1000){NET.rsT=now;NET.rsN=(NET.rsN||0)+1;netRel(NET.hostPid,{k:'rs'})}NET.lastSn=d.sn}
   const nm=MODEN[d.m];
   if(nm&&(G.mode==='count'||G.mode==='play'||G.mode==='ending')){
     if(nm==='ending'&&G.mode!=='ending'){G.winner=fs[d.w]||null;SFX.sting(d.w===NET.my)}
@@ -463,9 +494,9 @@ function netApplySnap(d){
     {let ex=P.tx-P.x,ey=P.ty-P.y,er=Math.hypot(ex,ey),acked=false;const mv=Math.hypot(P.mv.x,P.mv.y)>.1||P.dashT>0;
       const H=NET.hist;if(H&&typeof d.ak==='number'){while(H.length&&H[0].q<d.ak)H.shift();if(H.length&&H[0].q===d.ak&&!(P.jumpT>0)&&!(P.dashT>0&&P.dashSp>800)){ex=P.tx-H[0].x;ey=P.ty-H[0].y;er=Math.hypot(ex,ey);acked=true}}
       // host position trails the predicted one by ~RTT while moving: tolerate that lag, only correct real divergence
-      const tol=acked?14:mv?Math.max(70,(NET.rtt||120)*.42):10;
-      if(!P.alive||er>(acked?120:Math.max(260,tol*3))){P.x=P.tx;P.y=P.ty}
-      else if(er>tol){const k=(acked?.3:.1)*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
+      const tol=acked?20:mv?Math.max(70,(NET.rtt||120)*.42):10;
+      if(!P.alive||er>(acked?120:Math.max(260,tol*3))){P.x=P.tx;P.y=P.ty;NET.cor=null}
+      else if(er>tol){const k=(acked?.3:.1)*(er-tol)/er;NET.cor={x:ex*k,y:ey*k}}}
     if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt();if(typeof VOICE!=='undefined')VOICE.hurt(hp0-P.hp)}
   }
   // others
@@ -607,6 +638,7 @@ function netClientUpdate(dt){
     }
   }else if(!P.alive){P.mv={x:0,y:0};P.wantFire=false}
   if(G.pOut&&G.elimT>0){G.elimT-=dt;if(G.elimT<=0)openElim()}
+  if(NET.cor&&P.alive){const a=Math.min(1,dt*18),cx=NET.cor.x*a,cy=NET.cor.y*a;P.x+=cx;P.y+=cy;NET.cor.x-=cx;NET.cor.y-=cy;collide(P)}
   if(performance.now()-NET.lastIn>=33||NET.acts.length){NET.lastIn=performance.now();netSendInput()}
 }
 function controlNet(dt){
@@ -676,11 +708,41 @@ function netTogglePause(){
       <button class="go ghost" data-pf="settings-pause">Settings · Controls</button>
       <div class="row"><button class="go" data-act="resume">Resume</button><button class="go ghost" data-act="menu">Leave match</button></div>`)}
 }
+// ---------- lag indicator: RTT + packet loss from ping/pong ----------
+// NET.pq = recent pings {ts,ok}; a ping older than 3s with no pong counts as lost.
+function netPingSent(){
+  const ts=Date.now();
+  if(!NET.pq)NET.pq=[];
+  NET.pq.push({ts,ok:false});if(NET.pq.length>12)NET.pq.shift();
+  netSend({t:'ping',ts});
+}
+function netPongGot(ts,rt){
+  NET.pongAt=Date.now();
+  if(NET.pq)for(const p of NET.pq)if(p.ts===ts){p.ok=true;break}
+  if(rt<10000)NET.rttAvg=NET.rttAvg?NET.rttAvg*.7+rt*.3:rt;
+}
+function netLagInfo(){
+  const now=Date.now();let sent=0,lost=0;
+  if(NET.pq)for(const p of NET.pq){const age=now-p.ts;if(age>20000||age<3000)continue;sent++;if(!p.ok)lost++}
+  const loss=sent>=3?Math.round(lost/sent*100):0;
+  const rtt=Math.round(NET.rttAvg||NET.rtt||0);
+  const silent=NET.pongAt&&now-NET.pongAt>4000&&!document.hidden;
+  let lvl=0;
+  if(rtt>=120||loss>=5)lvl=1;
+  if(rtt>=250||loss>=15||silent)lvl=2;
+  return{rtt,loss,silent,lvl};
+}
 // small status line: room, ping, host stalls
 const netInfo=document.createElement('div');netInfo.id='netInfo';document.body.appendChild(netInfo);
 setInterval(()=>{
   if(!NET.live||ov.hidden===false&&G.mode==='menu'){netInfo.textContent='';return}
-  let s=`${NET.code} · ${NET.m==='host'?'HOST':NET.rtt+' ms'}`;
+  const li=netLagInfo();
+  let s=`${NET.code} · ${NET.m==='host'?'HOST · ':''}${li.rtt} ms`;
+  if(li.loss>0)s+=` · ${li.loss}% loss`;
+  if(li.silent)s+=' · no response';
+  else if(li.lvl===2)s+=' · lag!';
+  else if(li.lvl===1)s+=' · unstable';
+  netInfo.style.color=li.lvl===2?'#ff5a4a':li.lvl===1?'#f5c542':'';
   if(NET.m==='client'&&NET.gotSnap&&performance.now()-NET.lastSnap>1500&&(G.mode==='play'||G.mode==='count'))s+=' · waiting for host…';
   if(NET.m==='host'&&document.hidden)s+=' · keep this tab in front!';
   netInfo.textContent=s;

@@ -272,25 +272,33 @@ function byteBudget(ws, len, now) {
   ws.bBytes = (ws.bBytes || 0) + len;
   return '';
 }
-function msgAllowed(ws, t, len) {
-  const now = Date.now();
+// Token buckets per message class: { rate: tokens/sec sustained, burst: bucket size, msg: error text or null for silent drop }.
+// Input is capped separately from lobby actions, joins, pings and ready picks.
+const INPUT_PER_SEC = +(process.env.INPUT_PER_SEC || 120);
+const RATE_LIMITS = {
+  input: { rate: INPUT_PER_SEC, burst: INPUT_PER_SEC * 2, msg: null },
+  host:  { rate: MODE === 'auth' ? 30 : GAME_PER_SEC, burst: (MODE === 'auth' ? 30 : GAME_PER_SEC) * 2, msg: null },
+  ready: { rate: 4, burst: 8, msg: 'Slow down: too many requests.' },
+  ping:  { rate: 4, burst: 8, msg: null },
+  lobby: { rate: LOBBY_PER_SEC / 2, burst: LOBBY_PER_SEC, msg: 'Slow down: too many requests.' },
+  join:  { rate: JOIN_PER_10S / 10, burst: JOIN_PER_10S, msg: 'Too many join attempts. Wait a few seconds and try again.' }
+};
+function takeToken(ws, cls, now) {
+  const L = RATE_LIMITS[cls] || RATE_LIMITS.lobby;
+  const all = ws.tb || (ws.tb = {});
+  const s = all[cls] || (all[cls] = { n: L.burst, ts: now, warn: 0 });
+  s.n = Math.min(L.burst, s.n + Math.max(0, now - s.ts) * L.rate / 1000); s.ts = now;
+  if (s.n >= 1) { s.n -= 1; return true; }
+  if (L.msg && now - s.warn >= 1000) { s.warn = now; send(ws, { t: 'err', msg: L.msg }); }
+  return false;
+}
+function msgAllowed(ws, m, len) {
+  const now = Date.now(), t = m.t;
   let ok = true;
   if (t === 'r') {
     if (MODE === 'auth' && len > MAX_GAME_BYTES) ok = false;
-    else { if (now - ws.gWin >= 1000) { ws.gWin = now; ws.gN = 0; } ok = ++ws.gN <= GAME_PER_SEC; }
-  } else {
-    if (len > MAX_LOBBY_BYTES) ok = false;
-    else {
-      if (now - ws.lWin >= 1000) { ws.lWin = now; ws.lN = 0; ws.lWarned = false; }
-      if (++ws.lN > LOBBY_PER_SEC) {
-        ok = false;
-        if (!ws.lWarned) { ws.lWarned = true; send(ws, { t: 'err', msg: 'Slow down: too many requests.' }); }
-      } else if (t === 'join' || t === 'quick' || t === 'rejoin') {
-        if (now - ws.jWin >= 10000) { ws.jWin = now; ws.jN = 0; }
-        if (++ws.jN > JOIN_PER_10S) { ok = false; send(ws, { t: 'err', msg: 'Too many join attempts. Wait a few seconds and try again.' }); }
-      }
-    }
-  }
+  } else if (len > MAX_LOBBY_BYTES) ok = false;
+  if (ok) ok = takeToken(ws, msgClass(m), now);
   let why = ok ? '' : 'rate';
   if (ok) { why = byteBudget(ws, len, now); ok = !why; }
   if (!ok) noteDrop(ws, why);
@@ -302,7 +310,7 @@ const ACT_KEYS = ['a', 'd', 'h', 'm', 'r', 'u', 'z'];
 const RELAY_HOST_KINDS = ['s', 'start', 'res', 'drop'];   // relay mode: the only message kinds the host may send to peers
 const RELAY_MAX_HOST = 200000;                          // max serialized size of one host relay message (chars)
 const numIn = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0; };
-const { validateMsg } = require('./validate');
+const { validateMsg, msgClass } = require('./validate');
 function cleanGameMsg(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
   if (d.k === 'i') {
@@ -322,6 +330,7 @@ function cleanGameMsg(d) {
     }
     return { k: 'ready', picks };
   }
+  if (d.k === 'rs') return { k: 'rs' };   // client asks for a full-state resync snapshot
   return null;
 }
 function newCode() {
@@ -330,7 +339,20 @@ function newCode() {
     let c = ''; for (let i = 0; i < 4; i++) c += A[Math.floor(Math.random() * A.length)];
     if (!rooms.has(c)) return c;
   }
+  // random tries collided: scan the whole code space deterministically
+  const base = Math.floor(Math.random() * A.length ** 4);
+  for (let k = 0; k < A.length ** 4; k++) {
+    let n = (base + k) % (A.length ** 4), c = '';
+    for (let i = 0; i < 4; i++) { c = A[n % A.length] + c; n = Math.floor(n / A.length); }
+    if (!rooms.has(c)) return c;
+  }
   return null;
+}
+let lastFullLog = 0;
+function serverFull(ws) {
+  const now = Date.now();
+  if (now - lastFullLog > 30000) { lastFullLog = now; console.warn('server full: rooms=' + rooms.size + '/' + MAX_ROOMS); }
+  return send(ws, { t: 'err', code: 'full', msg: 'Server full: too many rooms are open right now. Try again in a minute.' });
 }
 function uniqueName(room, name) {
   let base = clean(name, 14) || 'Player', n = base, i = 2;
@@ -528,7 +550,7 @@ wss.on('connection', (ws, req) => {
     if (++ws.msgs > 700) { noteDrop(ws, 'rate'); return; }                      // flood guard
     let m; try { m = JSON.parse(raw); } catch (e) { noteDrop(ws, 'client'); return; }
     if (!m || typeof m.t !== 'string') { noteDrop(ws, 'client'); return; }
-    if (!msgAllowed(ws, m.t, raw.length)) return;
+    if (!msgAllowed(ws, m, raw.length)) return;
     const v = validateMsg(m);                         // strict per-type schema check
     if (!v.ok) {
       if (v.err) send(ws, { t: 'err', msg: v.err });
@@ -541,9 +563,9 @@ wss.on('connection', (ws, req) => {
     switch (m.t) {
       case 'ping': return send(ws, { t: 'pong', ts: m.ts });
       case 'create': {
-        if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
+        if (rooms.size >= MAX_ROOMS) return serverFull(ws);
         if (roomLimited(ws)) return;
-        const code = newCode(); if (!code) return send(ws, { t: 'err', msg: 'No room codes free.' });
+        const code = newCode(); if (!code || rooms.has(code)) return serverFull(ws);
         const r = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() };
         rooms.set(code, r); return joinRoom(ws, r, m.name, m.weapon);
       }
@@ -558,10 +580,10 @@ wss.on('connection', (ws, req) => {
         let best = null;
         for (const r of rooms.values()) if (!joinBlock(r) && (!best || r.players.size > best.players.size)) best = r;
         if (!best) {
-          if (rooms.size >= MAX_ROOMS) return send(ws, { t: 'err', msg: 'Server is busy, try again in a minute.' });
+          if (rooms.size >= MAX_ROOMS) return serverFull(ws);
           if (MODE === 'auth' && activeMatches() >= MAX_MATCHES) return send(ws, { t: 'err', msg: 'The server is running as many matches as it can. Try again shortly.' });
           if (roomLimited(ws)) return;
-          const code = newCode(); if (!code) return send(ws, { t: 'err', msg: 'No room codes free.' });
+          const code = newCode(); if (!code || rooms.has(code)) return serverFull(ws);
           best = { code, players: new Map(), held: new Map(), host: 0, started: false, created: Date.now(), auth: MODE === 'auth', sim: null, cfg: newCfg() }; rooms.set(code, best);
         }
         return joinRoom(ws, best, m.name, m.weapon);

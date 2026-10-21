@@ -24,6 +24,16 @@ test('lobby field types and lengths', () => {
   assert.ok(ok({ t: 'cfg', mode: 'duel', size: 2, mods: ['a'] }));
 });
 
+test('msgClass buckets messages for rate limiting', () => {
+  const { msgClass } = require('../validate');
+  assert.strictEqual(msgClass({ t: 'r', d: { k: 'i' } }), 'input');
+  assert.strictEqual(msgClass({ t: 'r', d: { k: 'ready' } }), 'ready');
+  assert.strictEqual(msgClass({ t: 'r', d: { k: 's' } }), 'host');
+  assert.strictEqual(msgClass({ t: 'ping' }), 'ping');
+  assert.strictEqual(msgClass({ t: 'join' }), 'join');
+  assert.strictEqual(msgClass({ t: 'upd' }), 'lobby');
+});
+
 test('ping ts is sanitised', () => {
   assert.strictEqual(validateMsg({ t: 'ping', ts: 'abc' }).msg.ts, 0);
   assert.strictEqual(validateMsg({ t: 'ping', ts: 12 }).msg.ts, 12);

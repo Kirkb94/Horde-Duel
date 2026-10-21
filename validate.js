@@ -7,7 +7,7 @@ const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= l
 // NaN serialises to null in JSON, so null is tolerated and treated as 0 downstream.
 const numOrNull = (v, lo, hi) => v === undefined || v === null || num(v, lo, hi);
 const fail = err => ({ ok: false, err: err || null });
-const GAME_KINDS = ['i', 'ready', 's', 'start', 'res', 'drop'];
+const GAME_KINDS = ['i', 'ready', 'rs', 's', 'start', 'res', 'drop'];
 
 function validInput(d) {
   if (!numOrNull(d.mx, -2, 2) || !numOrNull(d.my, -2, 2) || !numOrNull(d.f, -1e4, 1e4)) return false;
@@ -71,4 +71,20 @@ function validateMsg(m) {
   }
 }
 
-module.exports = { validateMsg };
+// Rate-limit class of a parsed message (used by server.js token buckets).
+// input = per-frame player input; ready = loadout pick; host = relay host snapshots/start/results;
+// join = join/quick/rejoin; ping = RTT pings; lobby = everything else (create, cfg, upd, start, leave...).
+function msgClass(m) {
+  const t = m && m.t;
+  if (t === 'ping') return 'ping';
+  if (t === 'join' || t === 'quick' || t === 'rejoin') return 'join';
+  if (t === 'r') {
+    const k = m.d && m.d.k;
+    if (k === 'i') return 'input';
+    if (k === 'ready') return 'ready';
+    return 'host';
+  }
+  return 'lobby';
+}
+
+module.exports = { validateMsg, msgClass };
