@@ -321,7 +321,7 @@ function netApplySnap(d){
       P[k]=v}
     P.tx=t[1];P.ty=t[2];G.pending=P.pend||0;
     if(!P.alive||Math.hypot(P.tx-P.x,P.ty-P.y)>140){P.x=P.tx;P.y=P.ty}else{P.x+=(P.tx-P.x)*.18;P.y+=(P.ty-P.y)*.18}
-    if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt()}
+    if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt();if(typeof VOICE!=='undefined')VOICE.hurt(hp0-P.hp)}
   }
   // others
   for(const t of d.F){const f=fs[t[0]];if(!f||f===P)continue;f.alive=!!t[1];

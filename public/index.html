@@ -686,7 +686,8 @@ function drawDecor(vx0,vx1,vy0,vy1){
   ctx.fillStyle='rgba(107,227,138,.45)';ctx.beginPath();
   for(const c of CHOKES){if(c.x<vx0||c.x>vx1||c.y<vy0||c.y>vy1)continue;ctx.moveTo(c.x+4,c.y);ctx.arc(c.x,c.y,4,0,TAU)}
   ctx.fill();ctx.restore();
-  // decals
+  // decals (toned down so zombies and pickups read against the floor)
+  ctx.save();ctx.globalAlpha*=.6;
   for(let ix=Math.max(0,Math.floor(vx0/500));ix<=Math.min(7,Math.floor(vx1/500));ix++)for(let iy=Math.max(0,Math.floor(vy0/500));iy<=Math.min(7,Math.floor(vy1/500));iy++){
     const a=DECOR.b.get(ix*16+iy);if(!a)continue;
     for(const o of a){if(o.x<vx0-320||o.x>vx1+320||o.y<vy0-320||o.y>vy1+320)continue;
@@ -703,6 +704,7 @@ function drawDecor(vx0,vx1,vy0,vy1){
         case 10:ctx.save();ctx.translate(o.x,o.y);ctx.rotate(o.a);ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(-32,-15,64,30);ctx.fillStyle='#6d7679';ctx.fillRect(-30,-13,60,26);ctx.fillStyle='#8f1c22';ctx.fillRect(-4,-13,8,26);ctx.fillStyle='#1b1e20';ctx.beginPath();for(const [wx,wy] of [[-24,-16],[24,-16],[-24,16],[24,16]]){ctx.moveTo(wx+3,wy);ctx.arc(wx,wy,3,0,TAU)}ctx.fill();ctx.restore();break;
         case 11:ctx.fillStyle='rgba(60,160,120,.18)';ctx.fillRect(o.x-18,o.y-70,36,140);ctx.fillRect(o.x-70,o.y-18,140,36);break}
     }}
+  ctx.restore();
 }
 function setMap(id){
   if(!MAPS[id])id='hotel';MAPID=id;
@@ -1000,8 +1002,10 @@ const NARR=(()=>{
   function stop(){if(cur){try{cur.pause()}catch(e){}cur=null}}
   function say(group,o){
     o=o||{};
+    if(typeof VOICE!=='undefined'&&VOICE.hook(group,o))return true;
     const list=pool(group);if(!list.length)return false;
     if(typeof SFX==='undefined'||!SFX.on)return false;
+    if(typeof VOICE!=='undefined'&&VOICE.busy()&&!o.force){if(o.queue)qd=group;return false}
     if(cur&&!cur.ended&&!cur.paused){if(!o.force){if(o.queue)qd=group;return false}stop()}
     if(o.force)qd=null;
     let pick=list[Math.floor(Math.random()*list.length)];
@@ -1062,6 +1066,7 @@ const NARR=(()=>{
     if(st.shrinking&&S.shr===i&&S.sg!==i&&G.time-S.shrT>5){S.sg=i;amb('vo_horde_surge')}
     if(!S.grow&&G.time>120){S.grow=true;amb('vo_horde_growing')}
     if(!P.alive)return;
+    VOICE.tick(dt);
     const out=Math.hypot(P.x-st.cx,P.y-st.cy)>st.r;S.out=out?S.out+dt:0;
     if(S.out>2&&now-S.o>15&&say('vo_outside_zone'))S.o=now;
     if(S.out>1&&now-S.h>25&&G.fighters.some(z=>z.zk==='hunter'&&z.alive&&z.owner===P)&&say('vo_hunter'))S.h=now;
@@ -1096,7 +1101,96 @@ const NARR=(()=>{
       if(by!==G.P)say('vo_other_elim');
     }
   }
-  return {say,stop,lead,has,step,down,revive,elim};
+  const busy=()=>!!(cur&&!cur.ended&&!cur.paused);
+  return {say,stop,lead,has,step,down,revive,elim,busy};
+})();
+
+// ---------- Character voices (recorded lines in public/audio/voices/<character>/) ----------
+// Manifest: 'name:N' = N takes (name_01..name_NN), bare 'name_01' = one exact file. Only list files that exist.
+const VOICE=(()=>{
+  const MAN={
+    wren:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 ability_ready:2 ability_turret:2 turret_kill_zombie:2 turret_kill_player:2 turret_gone:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_pistol:2 reload:2 loot:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    cinder:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 revive_give:2 revive_get:2 loot:2 low_ammo:1 reload:2 ability_ready:2 molotov_use:2 molotov_kill_zombie:2 molotov_kill_player:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_revolver:2 low_health:2 low_health_long:1 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 last_standing:2 victory:2 defeat:2 idle:3'
+  };
+  const CH={pistol:'wren',revolver:'cinder'};
+  const lib={};
+  for(const c in MAN){const g=lib[c]={};for(const t of MAN[c].split(' ')){const m=t.split(':');if(m[1]){const a=[];for(let i=1;i<=+m[1];i++)a.push(m[0]+'_'+(i<10?'0':'')+i);g[m[0]]=a}else g[t]=[t]}}
+  const HMAP={vo_horde_surge:['callout_horde',{cd:20}],vo_zone_shrinking:['callout_zone',{cd:20,key:'zone'}],vo_zone_warning:['callout_zone',{cd:20,key:'zone'}],vo_mate_down:['callout_mate_down',{cd:10}],vo_you_down:['down_01',{pri:2}],vo_you_eliminated:['down_02',{pri:2}],vo_elim_storm:['down_02',{pri:2}],vo_elim_horde:['down_02',{pri:2}],vo_revive_give:['revive_give',{pri:2}],vo_revive_get:['revive_get',{pri:2}],vo_streak_2:['streak_01',{pri:2}],vo_streak_3:['streak_02',{pri:2}],vo_you_kill:['kill_player',{pri:2}],vo_left_02:['last_standing',{pri:2}],vo_team_one_left:['last_standing',{pri:2}],vo_match_win:['victory',{pri:2}],vo_match_win_team:['victory',{pri:2}],vo_match_lose:['defeat',{pri:2}]};
+  let cur=null,curPri=0,lastEnd=0,lastAny=0,lastStart=-99,cd={},last={},pend=[],bad={};
+  let st={heal:0,hp0:0,rel:false,ab:false,low:0,sc:0,gt:0};
+  const now=()=>performance.now()/1000;
+  const who=()=>(G.P&&!G.debug&&!G.zmode)?CH[G.P.weapon]:null;
+  const busy=()=>!!(cur&&!cur.ended&&!cur.paused);
+  function stop(){if(cur){try{cur.pause()}catch(e){}cur=null}}
+  function play(k,o){
+    o=o||{};const c=who();if(!c||typeof SFX==='undefined'||!SFX.on)return false;
+    const keys=Array.isArray(k)?k:[k];k=keys.find(x=>lib[c][x]&&lib[c][x].some(f=>!bad[c+f]));if(!k)return false;
+    const t=now(),key=o.key||k,pri=o.pri||0;
+    if(o.cd&&cd[key]!==undefined&&t-cd[key]<o.cd)return false;
+    if(busy()){if(pri<=curPri)return false}
+    else if(pri===0&&!o.nogap&&t-lastEnd<2.5)return false;
+    if(pri===0&&NARR.busy())return false;
+    const list=lib[c][k].filter(f=>!bad[c+f]);
+    let pick=list[Math.floor(Math.random()*list.length)];
+    if(list.length>1&&pick===last[c+k])pick=list[(list.indexOf(pick)+1)%list.length];
+    last[c+k]=pick;
+    stop();
+    try{
+      const a=new Audio('audio/voices/'+c+'/'+pick+'.mp3');
+      a.volume=Math.max(0,Math.min(1,VOLK));
+      const done=()=>{if(cur===a){cur=null;lastEnd=now()}};
+      a.addEventListener('ended',done);
+      a.addEventListener('error',()=>{bad[c+pick]=1;done()});
+      cur=a;curPri=pri;
+      const p=a.play();if(p&&p.catch)p.catch(()=>{bad[c+pick]=1;done()});
+    }catch(e){cur=null;return false}
+    cd[key]=t;lastAny=t;
+    return true;
+  }
+  setInterval(()=>{if(cur){if(typeof SFX==='undefined'||!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK))}},250);
+  function later(k,wait){const c=who();if(c&&lib[c][k]&&pend.length<3)pend.push({c,k,exp:now()+wait})}
+  // offered every narrator line; true = the character spoke instead of the narrator
+  function hook(group,o){
+    const c=who();if(!c)return false;
+    if(group==='vo_match_start'){
+      const t=now();if(t-lastStart<15)return false;lastStart=t;
+      if(!(G.dropNo>1))later('intro',14);
+      later('match_start',14);return false;
+    }
+    const m=HMAP[group];if(!m||!lib[c][m[0]])return false;
+    return play(m[0],Object.assign({},m[1]));
+  }
+  function hurt(amt){
+    if(!G.P||!who())return;
+    if(amt>=Math.max(22,mhp(G.P)*.3))play('hurt_heavy',{pri:2,cd:3,key:'heavy'});
+    else play('hurt_grunt',{pri:1,cd:1.6,key:'hurt'});
+  }
+  function ability(k){const m={pistol:'ability_turret',revolver:'molotov_use'}[k];if(m)play(m,{pri:1,cd:2})}
+  function zkill(z){
+    if(!who())return;
+    if(z.zk==='boss'||z.zk==='brute'){play('kill_boss',{pri:1,cd:5,key:'kb'});return}
+    if(Math.random()<.3){const wk={pistol:'kill_pistol',revolver:'kill_revolver'}[G.P.weapon];play(Math.random()<.35&&wk?wk:'kill_zombie',{cd:9,key:'kz'})}
+  }
+  function tick(dt){
+    const P=G.P,c=who(),t=now();if(!c)return;
+    if(G.time<st.gt-.5){st={heal:0,hp0:0,rel:false,ab:false,low:0,sc:0,gt:0};pend.length=0}
+    st.gt=G.time;if(!lastAny)lastAny=t;
+    while(pend.length&&(pend[0].c!==c||t>pend[0].exp))pend.shift();
+    if(pend.length&&!busy()&&!NARR.busy()){const p=pend.shift();play(p.k,{nogap:1,key:'q_'+p.k})}
+    if(P.down)return;
+    const healing=P.healT>0;
+    if(healing&&!st.heal){st.heal=1;st.hp0=P.hp}
+    if(!healing&&st.heal){st.heal=0;if(P.hp>st.hp0+3)play('heal',{cd:8})}
+    const rl=P.reloadT>0;if(rl&&!st.rel&&Math.random()<.5)play('reload',{cd:25});st.rel=rl;
+    const ab=P.abCD>0;if(st.ab&&!ab)play('ability_ready',{cd:10});st.ab=ab;
+    const hpf=P.hp/mhp(P);
+    if(hpf<.3){st.low+=dt;if(st.low>1.5)play(st.low>8?['low_health_long','low_health']:['low_health','low_health_long'],{cd:30,key:'low'})}else st.low=0;
+    st.sc-=dt;
+    if(st.sc<=0){st.sc=.5;
+      for(const z of G.fighters)if(z.zomb&&z.alive&&z.zk==='boss'&&Math.hypot(z.x-P.x,z.y-P.y)<420){play('callout_boss',{cd:45});break}
+      if(t-lastAny>50&&G.time-(P.hitT||-99)>10&&hpf>=.5)play('idle',{cd:45})}
+  }
+  return {hook,hurt,ability,zkill,tick,busy,stop};
 })();
 
 // ---------- Audio: procedural post-apocalyptic horror (no files) ----------
@@ -1686,7 +1780,7 @@ function damage(t,amt,src,b,dot){
   const hit0=amt>0;
   if(hit0&&t.armor>0&&!dot)amt=Math.max(0,amt-2);
   if(hit0&&t.armor>0){const a=Math.min(t.armor,amt);t.armor-=a;amt-=a;if(!dot&&near(t.x,t.y))burst(t.x,t.y,'#8fb8d8',3,150)}
-  if(hit0&&!dot){if(t===G.P)SFX.hurt();SFX.thwack(t.x,t.y);if(src&&!src.zomb&&!t.zomb)noise(t.x,t.y,380)}
+  if(hit0&&!dot){if(t===G.P){SFX.hurt();VOICE.hurt(amt)}SFX.thwack(t.x,t.y);if(src&&!src.zomb&&!t.zomb)noise(t.x,t.y,380)}
   if(hit0){if(amt>0)t.hp-=amt;t.hitT=G.time;if(!dot){t.hitFlash=0.1;if(t.healT>0){t.healT=0;t.healKind=null}}}
   if(src){
     if(!t.zomb)gainXP(src,full);
@@ -2096,7 +2190,7 @@ function useAbilityCore(f){
   if(!f.alive||f.abCD>0||f.dashT>0||f.jumpT>0||f.healT>0)return false;
   if(f.weapon==='smg'&&!(f.mines>0))return false;
   if(f.down)return false;
-  const fx=f.st.fx,k=f.weapon,ds=G.deploys;SFX.ability(f);noise(f.x,f.y,520);
+  const fx=f.st.fx,k=f.weapon,ds=G.deploys;SFX.ability(f);noise(f.x,f.y,520);if(f===G.P)VOICE.ability(k);
   if(k==='crossbow')return fenceUse(f);
   if(k==='pistol'){
     ownerCap(f,'turret',1+(fx.twin||0));
@@ -2478,7 +2572,7 @@ function eliminate(t,src){
   if(t.zomb){
     SFX.zdie(t.x,t.y);
     const by=src&&src!==t?src:null;
-    if(by&&by===G.P){achZKill();if(t.zk==='boss')achUnlock('boss')}
+    if(by&&by===G.P){achZKill();if(t.zk==='boss')achUnlock('boss');VOICE.zkill(t)}
     if(by&&!by.zomb){by.zk=(by.zk||0)+1;by.hp=Math.min(mhp(by),by.hp+2+3*(by.st.fx.bounty||0));if(by.st.fx.refill){by.ammo=by.st.clip;by.reloadT=0}}
     G.fx.push({kind:'splat',x:t.x,y:t.y,r:t.r*rnd(1.3,1.8),a:Math.random()*TAU,age:0,life:9});
     if(near(t.x,t.y)){burst(t.x,t.y,'#7fb35a',16,300);burst(t.x,t.y,'#a3202a',8,240)}
@@ -3022,6 +3116,7 @@ function drawZombie(z){
   const body=k==='hunter'?'#a8485e':k==='brute'?'#5b7a3a':k==='boss'?'#6b3a52':k==='runner'?'#8aa84a':k==='sprinter'?'#c9d84a':'#6f9a4e',dark=k==='boss'?'#2a1020':'#243818';
   if(z.hitFlash>0)ctx.globalAlpha=.75;
   ctx.fillStyle='rgba(0,0,0,.28)';ctx.beginPath();ctx.ellipse(0,3,z.r*1.15,z.r*.8,0,0,TAU);ctx.fill();
+  {const gc=k==='hunter'?'255,138,160':k==='sprinter'?'255,242,122':k==='boss'?'255,111,138':'190,230,150';ctx.fillStyle='rgba('+gc+',.12)';ctx.beginPath();ctx.arc(0,0,z.r*1.45,0,TAU);ctx.fill();ctx.strokeStyle='rgba('+gc+',.38)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,0,z.r*1.2,0,TAU);ctx.stroke()}
   // arms reaching forward
   ctx.strokeStyle=dark;ctx.lineWidth=5*big;ctx.lineCap='round';
   for(const sd of[-1,1]){const reach=z.r*(1.15+.35*sw+bob*sd);ctx.beginPath();ctx.moveTo(z.r*.2,sd*z.r*.7);ctx.lineTo(reach+z.r*.35,sd*z.r*(.55-.15*sw));ctx.stroke();
@@ -4287,7 +4382,7 @@ function render0(){
   {// horror lighting: everything fades to black away from the viewer, with a faint flicker and a red pulse when hurt
     const zz=zoom(),sx=(V.x-G.cam.x)*zz+VW/2,sy=(V.y-G.cam.y)*zz+VH/2,R=Math.max(VW,VH)*.75,fl=.95+.05*Math.sin(G.time*23+Math.sin(G.time*7)*3)+(Math.random()<.02?-.06:0);
     const g=ctx.createRadialGradient(sx,sy,vr(V)*zz*.12,sx,sy,Math.min(R,vr(V)*zz*1.35));
-    g.addColorStop(0,'rgba(0,3,3,0)');g.addColorStop(.55,`rgba(0,2,2,${.5*fl})`);g.addColorStop(1,`rgba(0,1,1,${.9*fl})`);
+    g.addColorStop(0,'rgba(0,3,3,0)');g.addColorStop(.55,`rgba(0,2,2,${.4*fl})`);g.addColorStop(1,`rgba(0,1,1,${.78*fl})`);
     ctx.fillStyle=g;ctx.fillRect(0,0,VW,VH);
     if(P.alive&&!G.debug){const fr=P.hp/mhp(P);if(fr<.45){const pu=.5+.5*Math.sin(G.time*(5+8*(1-fr)));const rg=ctx.createRadialGradient(VW/2,VH/2,Math.min(VW,VH)*.3,VW/2,VH/2,Math.max(VW,VH)*.75);rg.addColorStop(0,'rgba(120,0,10,0)');rg.addColorStop(1,`rgba(120,0,10,${(.5-fr)*.9*(.5+.5*pu)})`);ctx.fillStyle=rg;ctx.fillRect(0,0,VW,VH)}}
   }
@@ -4850,7 +4945,7 @@ function netApplySnap(d){
       const tol=mv?Math.max(70,(NET.rtt||120)*.42):10;
       if(!P.alive||er>Math.max(260,tol*3)){P.x=P.tx;P.y=P.ty}
       else if(er>tol){const k=.1*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
-    if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt()}
+    if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt();if(typeof VOICE!=='undefined')VOICE.hurt(hp0-P.hp)}
   }
   // others
   for(const t of d.F){const f=fs[t[0]];if(!f||f===P)continue;f.alive=!!t[1];

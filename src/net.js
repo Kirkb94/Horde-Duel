@@ -412,7 +412,7 @@ function netApplySnap(d){
       const tol=mv?Math.max(70,(NET.rtt||120)*.42):10;
       if(!P.alive||er>Math.max(260,tol*3)){P.x=P.tx;P.y=P.ty}
       else if(er>tol){const k=.1*(er-tol)/er;P.x+=ex*k;P.y+=ey*k}}
-    if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt()}
+    if(P.alive&&P.hp<hp0-1.2&&performance.now()-NET.hurtT>150){NET.hurtT=performance.now();SFX.hurt();if(typeof VOICE!=='undefined')VOICE.hurt(hp0-P.hp)}
   }
   // others
   for(const t of d.F){const f=fs[t[0]];if(!f||f===P)continue;f.alive=!!t[1];
