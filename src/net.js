@@ -162,11 +162,15 @@ function netReadForm(){
 }
 function netCap(){const c=NET.cfg;return c.mode==='duel'?2:c.mode==='team'?4:c.size}
 function netSizeChange(v){if(NET.role==='host'){NET.cfg.size=v;const e=$('#nsizeV');if(e)e.textContent=v;clearTimeout(netSizeChange.t);netSizeChange.t=setTimeout(()=>netSend({t:'cfg',mode:NET.cfg.mode,size:v,map:NET.cfg.map}),150)}}
+function modLine(m){m=(m||[]).filter(k=>MODS[k]);return m.length?`<p class="lede" style="color:#ffd166;font-weight:700">Modifiers on: ${m.map(k=>esc(MODS[k][0])).join(' · ')}</p>`:''}
+function modGroup(){const m=NET.cfg.mods||[];return `<div class="group"><span class="glabel">Modifiers (apply to everyone)</span><div class="seg" style="grid-template-columns:repeat(2,1fr)">${Object.entries(MODS).map(([k,v])=>`<button data-act="n_mod" data-v="${k}" title="${esc(v[1])}" aria-pressed="${m.includes(k)}">${esc(v[0])}</button>`).join('')}</div></div>`}
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-act=n_mod]');if(!b||NET.role!=='host'||NET.view!=='lobby')return;const k=b.dataset.v,m=(NET.cfg.mods||[]).slice(),i=m.indexOf(k);if(i>=0)m.splice(i,1);else if(MODS[k])m.push(k);NET.cfg.mods=m;b.setAttribute('aria-pressed',m.includes(k));netSend({t:'cfg',mode:NET.cfg.mode,size:NET.cfg.size,map:NET.cfg.map,mods:m})});
+(function(){const el=document.createElement('div');el.id='modStrip';el.style.cssText='position:fixed;top:22px;left:50%;transform:translateX(-50%);z-index:9;pointer-events:none;font:700 11px var(--mono);color:#ffd166;background:rgba(0,0,0,.6);border:1px solid #ffd16688;border-radius:4px;padding:3px 8px;letter-spacing:.05em;display:none;max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';(document.body||document.documentElement).appendChild(el);setInterval(()=>{const m=((G.cfg&&G.cfg.mods)||[]).filter(k=>MODS[k]),on=!!G.P&&G.mode!=='menu'&&m.length>0;if(!on){if(el.style.display!=='none')el.style.display='none';return}const t='MODIFIERS: '+m.map(k=>MODS[k][0]).join(' · ');if(el.textContent!==t)el.textContent=t;el.style.display='block'},400)})();
 function netLobby(){
   NET.view='lobby';G.mode='menu';G.P=null;showHUD(false);
   const host=NET.role==='host',cfg=NET.cfg,tm=cfg.mode==='team',capN=netCap(),me=NET.players.find(p=>p.pid===NET.pid);
   const tl=t=>t===1?'Team B':'Team A';
-  show(`<p class="eyebrow">Room code · ${NET.players.length}/${capN} players · ${MODES[cfg.mode]}${cfg.mode==='br'?' · '+cfg.size+' fighters':''}</p><h1 style="letter-spacing:.25em;font-size:56px">${esc(NET.code)}</h1>
+  show(`<p class="eyebrow">Room code · ${NET.players.length}/${capN} players · ${MODES[cfg.mode]}${cfg.mode==='br'?' · '+cfg.size+' fighters':''}</p><h1 style="letter-spacing:.25em;font-size:56px">${esc(NET.code)}</h1>${modLine(cfg.mods)}
   ${NET.notice?`<p class="lede" style="color:var(--foe)">${esc(NET.notice)}</p>`:''}
   <p class="lede">${host?(NET.auth?'Share the code with friends. Empty slots are filled with bots when you start.':'Share the code with friends. Empty slots are filled with bots when you start. Keep this tab open and in front: the match runs in your browser.'):'Waiting for the room leader to start the match.'}</p>
   <div class="tbl">${NET.players.map(p=>`<div class="tr${p.pid===NET.pid?' me':''}"><span>${p.pid===NET.hostPid?'★':''}</span><span>${esc(p.name)}</span><span>${tm?tl(p.team)+' · ':''}${CHARS[p.weapon]?CHARS[p.weapon].name:''}</span></div>`).join('')}</div>
@@ -174,6 +178,7 @@ function netLobby(){
   ${host?`<div class="group"><span class="glabel">Mode</span><div class="seg">${Object.entries(MODES).map(([k,v])=>`<button data-act="n_mode" data-v="${k}" aria-pressed="${cfg.mode===k}">${v}</button>`).join('')}</div></div>
   <div class="group"><span class="glabel">Map</span><div class="seg" style="grid-template-columns:repeat(4,1fr)">${[['random','Random'],...Object.entries(MAPS).map(([k,v])=>[k,v.name])].map(([k,v])=>`<button data-act="n_map" data-v="${k}" aria-pressed="${(cfg.map||'random')===k}">${v}</button>`).join('')}</div></div>
   ${cfg.mode==='br'?`<div class="group"><label class="glabel" for="nsize">Lobby size · <b id="nsizeV">${cfg.size}</b> fighters (empty slots are bots)</label><input class="nin" type="range" id="nsize" min="${Math.max(2,NET.players.length)}" max="16" value="${cfg.size}" style="padding:6px"></div>`:`<p class="lede">${cfg.mode==='duel'?'1v1: a small arena with a light zombie horde. First to 3 round wins.':'2v2: two teams of two, pick yours above. Bots fill empty team slots. Allies cannot hurt each other.'}</p>`}
+  ${modGroup()}
   <div class="group"><span class="glabel">Bot skill</span><div class="seg">${Object.keys(DIFF).map(k=>`<button data-act="diff" data-v="${k}" aria-pressed="${G.diff===k}">${cap(k)}</button>`).join('')}</div></div>`:''}
   <details class="how"><summary>Change character</summary>${wepGrid()}</details>
   ${host?'<div class="pfoot"><button class="go" data-act="n_start">Start match</button></div>':''}
@@ -263,7 +268,7 @@ function controlRemote(f,dt){
     else if(a[0]==='z')toggleZoom(f);
     else if(a[0]==='u')usePanel(f,40);
     else if(a[0]==='m'&&f.weapon==='revolver'){
-      const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,Math.min(d,rayCast(f.x,f.y,ang,d+30)-10));
+      const wx=+a[1],wy=+a[2],ang=Math.atan2(wy-f.y,wx-f.x),d=Math.min(MOLO_R,Math.hypot(wx-f.x,wy-f.y)),w=Math.max(0,d);
       f.facing=ang;f.throwTarget={x:f.x+Math.cos(ang)*w,y:f.y+Math.sin(ang)*w};useAbility(f);f.throwTarget=null}
     else if(a[0]==='r'){if(f.reloadT<=0&&f.ammo<f.st.clip)f.reloadT=f.st.reload}
   }
@@ -308,7 +313,7 @@ function evt(o){NET.ev.push(o);if(NET.ev.length>700){NET.ev.splice(0,250);NET.ev
   for(const n of['snarl','boom','thwack','zdie','hunter']){const o=SFX[n];SFX[n]=function(x,y,a){o.call(SFX,x,y,a);if(NET.m==='host')evt({e:'s',n,x:x|0,y:y|0,a:typeof a==='number'?a:undefined})}}
   {const o=SFX.fdie;SFX.fdie=function(x,y,me){o.call(SFX,x,y,me);if(NET.m==='host')evt({e:'s',n:'fdie',x:x|0,y:y|0})}}
   {const o=SFX.pickup;SFX.pickup=function(k,x,y){o.call(SFX,k,x,y);if(NET.m==='host')evt({e:'s',n:'pickup',k,x:x|0,y:y|0})}}
-  const _feed=feedAdd;feedAdd=function(t,h){_feed(t,h);if(NET.m==='host')evt({e:'f',m:t,all:1})};
+  const _feed=feedAdd;feedAdd=function(t,h,ev){_feed(t,h,ev);if(NET.m==='host'){let o;if(ev){o=Object.assign({},ev);delete o.km;delete o.vm}evt({e:'f',m:t,all:1,ev:o})}};
   const _elim=eliminate;eliminate=function(t,src){
     const was=t.alive;_elim(t,src);
     if(NET.m==='host'&&was&&!t.zomb){
@@ -379,7 +384,7 @@ function netApplyDrop(d){
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
   if(d.map&&d.map!==MAPID)setMap(d.map);mapReset();G.dropNo=d.dn;G.sudden=!!d.su;G.draw=false;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;boReset();G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
   G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
-  SFX.drop();G.mode='count';G.countdown=3.2;hide();showHUD(true);
+  SFX.drop();NARR.say(G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start',{force:true});G.mode='count';G.countdown=3.2+NARR.lead();hide();showHUD(true);
 }
 function netApplySnap(d){
   if(!NET.live||NET.m!=='client'||!G.P)return;
@@ -468,7 +473,7 @@ function netReplay(e){
       if(o.kind==='death')o.col=o.who===NET.my?COL.you:COL.foe;
       if(o.kind==='splat')break;
       G.fx.push(o);break}
-    case'f':feedAdd(e.m,!!(P&&e.m.indexOf(P.name)>=0));break;
+    case'f':feedAdd(e.m,!!(P&&e.m.indexOf(P.name)>=0),e.ev);break;
     case'n':{const t=fById(e.t);if(!t)break;const mine=e.t===NET.my;addNum(t,e.v,mine?COL.foe:COL.you);break}
     case'k':{const f=fById(e.id);if(!f)break;f.alive=false;f.place=e.pl;
       if(e.id===NET.my){G.spectating=true;G.pOut=true;G.elimT=1.7;try{navigator.vibrate&&navigator.vibrate([40,40,80])}catch(_){}}break}
@@ -477,7 +482,7 @@ function netReplay(e){
 const DECAY=['muzzle','swingT','hitFlash','parryT','rdT','inv','dashCD','healT','shF','hurtT','cloakT','burnT','slowT','markT','dashT','reloadT','swingT','pingT','tagT','scanWarn','litT','fenceT','downT'];
 function netClientUpdate(dt){
   const P=G.P,fs=G.fighters;
-  if(G.mode==='count'){G.countdown-=dt;if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
+  if(G.mode==='count'){G.countdown-=dt;NARR.say.tick(G.countdown);if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
   else if(G.mode==='play'||G.mode==='ending')G.time+=dt;
   for(let i=0;i<fs.length;i++){const f=fs[i];
     f.t+=dt;for(const k of DECAY)if(f[k]>0)f[k]=Math.max(0,f[k]-dt);
@@ -528,7 +533,7 @@ function controlNet(dt){
     if(abQueued){abQueued=false;
       if(p.weapon==='revolver'){if(G.molo>0)G.molo=0;else if((p.abCD<=0||p.abCh>0)&&p.dashT<=0)G.molo=5}
       else NET.acts.push(p.weapon==='crossbow'&&p.tgtPt?['a',q2(p.tgtPt.x),q2(p.tgtPt.y)]:['a'])}
-    if(useQueued){useQueued=false;if(nearPanel(p))NET.acts.push(['u'])}
+    if(useQueued){useQueued=false;const pn=nearPanel(p);if(pn){NET.acts.push(['u']);const w=useWhy(pn.door);useFB(!w,w)}}
     if(keys.has('KeyR')&&performance.now()-NET.keyR>400){NET.keyR=performance.now();NET.acts.push(['r'])}
   }else{dashQueued=false;abQueued=false;healQueued=null;zoomQueued=false;useQueued=false}
   p.mv={x:mx,y:my};p.wantFire=fire&&!p.down;

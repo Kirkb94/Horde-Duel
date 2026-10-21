@@ -297,7 +297,7 @@ function netApplyDrop(d){
     f.tx=f.x;f.ty=f.y;f.tf=f.facing});
   G.dropNo=d.dn;G.sc=d.sc;G.st=storm(0);G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.feed=[];G.time=0;G.pending=0;G.molo=0;G.afterPick=false;G.pOut=false;G.elimT=0;G.spectating=false;G.spec=null;G.ff=false;G.winner=null;
   G.cam={x:G.P.x,y:G.P.y};NET.gotSnap=false;NET.hpPrev=G.P.hp;NET.pk=0;NET.picks=[];
-  SFX.drop();G.mode='count';G.countdown=3.2;hide();showHUD(true);
+  SFX.drop();NARR.say(G.sudden?'vo_sudden':G.dropNo>1?'vo_next_drop':'vo_match_start',{force:true});G.mode='count';G.countdown=3.2;hide();showHUD(true);
 }
 function netApplySnap(d){
   if(!NET.live||NET.m!=='client'||!G.P)return;
@@ -385,7 +385,7 @@ function netReplay(e){
 const DECAY=['muzzle','swingT','hitFlash','parryT','rdT','inv','dashCD','healT','shF','hurtT','cloakT','burnT','slowT','markT','dashT','reloadT','swingT','pingT','tagT','scanWarn','litT','fenceT','downT'];
 function netClientUpdate(dt){
   const P=G.P,fs=G.fighters;
-  if(G.mode==='count'){G.countdown-=dt;if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
+  if(G.mode==='count'){G.countdown-=dt;NARR.say.tick(G.countdown);if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
   else if(G.mode==='play'||G.mode==='ending')G.time+=dt;
   for(let i=0;i<fs.length;i++){const f=fs[i];
     f.t+=dt;for(const k of DECAY)if(f[k]>0)f[k]=Math.max(0,f[k]-dt);

@@ -346,7 +346,8 @@ function startSim(room, diff) {
   room.timer = setTimeout(loop, step);
 }
 const roomCap = room => room.cfg.mode === 'duel' ? 2 : room.cfg.mode === 'team' ? 4 : room.cfg.size;
-const newCfg = () => ({ mode: 'br', size: 16, map: 'random' });
+const MOD_KEYS = ['fast', 'frag', 'xp2', 'curse'];
+const newCfg = () => ({ mode: 'br', size: 16, map: 'random', mods: [] });
 function balanceTeams(room) {
   if (room.started || room.cfg.mode !== 'team') return;
   const ps = [...room.players.values()];
@@ -495,7 +496,9 @@ wss.on('connection', (ws, req) => {
         if (mode === 'br') size = Math.max(size, room.players.size);
         else if (room.players.size > cap) return send(ws, { t: 'err', msg: 'Too many players in the room for ' + (mode === 'duel' ? '1v1' : '2v2') + '.' });
         const map = m.map !== undefined ? m.map : room.cfg.map;
-        room.cfg = { mode, size, map };
+        if (m.mods !== undefined && !Array.isArray(m.mods)) return send(ws, { t: 'err', msg: 'Invalid modifiers.' });
+        const mods = m.mods !== undefined ? MOD_KEYS.filter(k => m.mods.includes(k)) : (room.cfg.mods || []);
+        room.cfg = { mode, size, map, mods };
         balanceTeams(room);
         return bcastPlayers(room);
       }
