@@ -59,8 +59,18 @@ function netWakeTry(){
   ws.onclose=()=>{clearTimeout(to);if(NET.ws!==ws)return;NET.ws=null;if(NET.wake===W)W.tm=setTimeout(netWakeTry,W.n<3?1500:3000);else netDropped(NET.status||NET.code||NET.live?'Lost connection to the server.':'Could not reach the server. Check the address under Server.')};
   ws.onerror=()=>{};
 }
-setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&Date.now()-(NET.rx||0)>12000){netDropped('Lost connection to the server (timed out).');return}netSend({t:'ping',ts:Date.now()})}},3000);
-document.addEventListener('visibilitychange',()=>{NET.rx=Date.now()});
+setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&!NET.chk&&Date.now()-(NET.rx||0)>12000){netDropped('Lost connection to the server (timed out).');return}netSend({t:'ping',ts:Date.now()})}},3000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)return;
+  const ws=NET.ws,t=Date.now();
+  if(NET.reco||NET.wake){NET.rx=t;return}
+  if(ws&&ws.readyState>=2){netDropped('Lost connection to the server.');return}
+  if(ws&&ws.readyState===1&&t-(NET.rx||0)>4000){
+    NET.chk=t;netSend({t:'ping',ts:t});
+    setTimeout(()=>{NET.chk=0;if(NET.ws===ws&&(NET.rx||0)<t)netDropped('Lost connection to the server (timed out).')},3000);
+    return}
+  NET.rx=t;
+});
 function netCleanup(){NET.live=false;NET.m=null;NET.paused=false;NET.zm.clear();NET.inp={};NET.cl={};NET.ready={};NET.acts=[];G.fighters=[];G.P=null;G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.spectating=false;G.pOut=false;G.mode='menu';showHUD(false)}
 // ---------- session token + auto-reconnect (auth mode) ----------
 const REJOIN_MS=28000;   // stay under the server's 30s slot hold
@@ -105,6 +115,15 @@ function netDropped(msg){
 }
 function netLeave(){netWakeStop();netRecoStop();netSessClear();netSend({t:'leave'});if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();menu()}
 function netMsg(m){
+  try{
+    if(!m||typeof m!=='object'||typeof m.t!=='string')return;
+    if((m.t==='joined'||m.t==='players')&&!Array.isArray(m.players))return;
+    if(m.t==='pong'&&typeof m.ts!=='number')return;
+    if(m.t==='r'&&(!m.d||typeof m.d!=='object'))return;
+    netMsgInner(m);
+  }catch(err){console.warn('netMsg error',err)}
+}
+function netMsgInner(m){
   switch(m.t){
     case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined)netRecoStop();if(m.started){NET.status='';break}netLobby();break;
     case'players':
@@ -120,6 +139,12 @@ function netMsg(m){
   }
 }
 function netRecv(from,d){
+  try{
+    if(!d||typeof d!=='object')return;
+    netRecvInner(from,d);
+  }catch(err){console.warn('netRecv error',err)}
+}
+function netRecvInner(from,d){
   if(!d)return;
   if(NET.m==='host'){
     if(d.k==='i'){const c=NET.cl[from];if(!c)return;let I=NET.inp[from];if(!I)I=NET.inp[from]={acts:[]};

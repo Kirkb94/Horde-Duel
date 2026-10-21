@@ -1110,12 +1110,24 @@ const NARR=(()=>{
 const VOICE=(()=>{
   const MAN={
     wren:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 ability_ready:2 ability_turret:2 turret_kill_zombie:2 turret_kill_player:2 turret_gone:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_pistol:2 reload:2 loot:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
-    cinder:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 revive_give:2 revive_get:2 loot:2 low_ammo:1 reload:2 ability_ready:2 molotov_use:2 molotov_kill_zombie:2 molotov_kill_player:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_revolver:2 low_health:2 low_health_long:1 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 last_standing:2 victory:2 defeat:2 idle:3'
+    cinder:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 revive_give:2 revive_get:2 loot:2 low_ammo:1 reload:2 ability_ready:2 molotov_use:2 molotov_kill_zombie:2 molotov_kill_player:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_revolver:2 low_health:2 low_health_long:1 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 last_standing:2 victory:2 defeat:2 idle:3',
+    haze:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 ability_mine:3 ability_ready:2 ability_tripped:2 kill_gas_zombie:2 kill_gas_player:2 ability_empty_01 ability_destroyed_01 loot:2 reload:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_smg:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 death_01 mate_down:2 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    aegis:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 barrier_use:2 barrier_break:2 barrier_ready:2 rifle_kill:2 reload:2 loot:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 hurt_grunt:6 hurt_heavy:2 low_health:2 heal:2 down_01 down_02 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    rampart:'intro:2 match_start:2 round_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 cover_use:3 cover_ready:2 cover_kill_zombie:3 cover_kill_player:3 cover_end:2 shotgun_kill:3 kill_zombie:5 streak_01 streak_02 kill_boss:2 kill_player:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 die:2 loot:2 reload:2 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    veil:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 callout_loot:2 ability_ready:2 cloak_use:2 cloak_end:2 kill_sniper:2 reload:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 low_health:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    lattice:'intro:2 match_start:2 next_drop:1 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 fence_use:2 fence_loop:1 fence_cloak:1 ability_ready:2 fence_kill_zombie:3 fence_kill_player:3 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_crossbow:3 reload:2 loot:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 revive_give:2 revive_get:2 no_revives_01 last_standing:2 victory:2 defeat:2 idle:4'
+    ,sabre:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 mate_down:2 lunge_ready:2 lunge_use:3 lunge_kill_zombie:2 lunge_kill_player:2 ammo:2 loot:2 revive_give:2 revive_get:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_sword:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 death:2 last_standing:2 victory:2 defeat:2 idle:3',
+    torque:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_special:2 callout_zone:2 callout_help:2 callout_mate_down:2 ability_ready:2 rocket_jump:3 rocket_jump_kill_zombie:2 rocket_jump_kill_player:2 rocket_jump_out:2 loot:2 reload:2 kill_zombie:5 streak_01 streak_02 kill_special:2 kill_player:2 kill_rocket:3 low_health:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    argus:'intro:2 match_start:3 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 loot:2 ammo:2 ability_scan:3 ability_ready:2 ability_scan_end:2 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 kill_carbine:2 kill_scanned:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 down_02 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:3',
+    halcyon:'intro:2 match_start:2 callout_enemy:2 callout_horde:2 callout_boss:2 callout_zone:2 callout_help:2 callout_mate_down:2 loot:2 reload:2 ability_bubble:4 ability_ready:2 kill_scorch:4 kill_zombie:4 streak_01 streak_02 kill_boss:2 kill_player:2 low_health_long:2 heal:2 hurt_grunt:6 hurt_heavy:2 down_01 die_01 revive_give:2 revive_get:2 last_standing:2 victory:2 defeat:2 idle:4'
   };
-  const CH={pistol:'wren',revolver:'cinder'};
+  const CH={pistol:'wren',revolver:'cinder',smg:'haze',rifle:'aegis',shotgun:'rampart',sniper:'veil',crossbow:'lattice',sword:'sabre',rocket:'torque',carbine:'argus',scorch:'halcyon'};
   const lib={};
   for(const c in MAN){const g=lib[c]={};for(const t of MAN[c].split(' ')){const m=t.split(':');if(m[1]){const a=[];for(let i=1;i<=+m[1];i++)a.push(m[0]+'_'+(i<10?'0':'')+i);g[m[0]]=a}else g[t]=[t]}}
-  const HMAP={vo_horde_surge:['callout_horde',{cd:20}],vo_zone_shrinking:['callout_zone',{cd:20,key:'zone'}],vo_zone_warning:['callout_zone',{cd:20,key:'zone'}],vo_mate_down:['callout_mate_down',{cd:10}],vo_you_down:['down_01',{pri:2}],vo_you_eliminated:['down_02',{pri:2}],vo_elim_storm:['down_02',{pri:2}],vo_elim_horde:['down_02',{pri:2}],vo_revive_give:['revive_give',{pri:2}],vo_revive_get:['revive_get',{pri:2}],vo_streak_2:['streak_01',{pri:2}],vo_streak_3:['streak_02',{pri:2}],vo_you_kill:['kill_player',{pri:2}],vo_left_02:['last_standing',{pri:2}],vo_team_one_left:['last_standing',{pri:2}],vo_match_win:['victory',{pri:2}],vo_match_win_team:['victory',{pri:2}],vo_match_lose:['defeat',{pri:2}],vo_horde_growing:['callout_horde',{cd:20}],vo_surrounded:['callout_help',{cd:20}],vo_hunter:['callout_enemy',{cd:20}]};
+  // recordings named differently from the generic moment keys
+  const AL={haze:{callout_mate_down:'mate_down',down_02:'death_01'},aegis:{ability_ready:'barrier_ready'},rampart:{down_02:'die',ability_ready:'cover_ready'},veil:{loot:'callout_loot'},sabre:{callout_mate_down:'mate_down',ability_ready:'lunge_ready',reload:'ammo'},torque:{callout_boss:'callout_special',kill_boss:'kill_special',low_health_long:'low_health'},argus:{reload:'ammo',low_health:'low_health_long'},halcyon:{down_02:'die_01',low_health:'low_health_long'}};
+  for(const c in AL)for(const k in AL[c])if(lib[c]&&lib[c][AL[c][k]]&&!lib[c][k])lib[c][k]=lib[c][AL[c][k]];
+  const HMAP={vo_horde_surge:['callout_horde',{cd:20}],vo_zone_shrinking:['callout_zone',{cd:20,key:'zone'}],vo_zone_warning:['callout_zone',{cd:20,key:'zone'}],vo_mate_down:['callout_mate_down',{cd:10}],vo_you_down:['down_01',{pri:2}],vo_you_eliminated:['down_02',{pri:2}],vo_elim_storm:['down_02',{pri:2}],vo_elim_horde:['down_02',{pri:2}],vo_revive_give:['revive_give',{pri:2}],vo_revive_get:['revive_get',{pri:2}],vo_streak_2:['streak_01',{pri:2}],vo_streak_3:['streak_02',{pri:2}],vo_you_kill:['kill_player',{pri:2}],vo_left_02:['last_standing',{pri:2}],vo_team_one_left:['last_standing',{pri:2}],vo_match_win:['victory',{pri:2}],vo_match_win_team:['victory',{pri:2}],vo_match_lose:['defeat',{pri:2}],vo_horde_growing:['callout_horde',{cd:20}],vo_surrounded:['callout_help',{cd:20}],vo_hunter:['callout_enemy',{cd:20}],vo_no_revives:['no_revives_01',{pri:1}]};
   let cur=null,curPri=0,lastEnd=0,lastAny=0,lastStart=-99,cd={},last={},pend=[],bad={};
   let st={heal:0,hp0:0,rel:false,ab:false,low:0,sc:0,gt:0};
   const now=()=>performance.now()/1000;
@@ -1170,7 +1182,7 @@ const VOICE=(()=>{
         if(a)later('match_start',14,a);else if(c)later('match_start',14,c);
       }else{
         const w=[];if(c)w.push(c);if(a)w.push(a);
-        if(w.length&&Math.random()<.6)later('match_start',14,w[Math.floor(Math.random()*w.length)]);
+        if(w.length&&Math.random()<.6){const g=w[Math.floor(Math.random()*w.length)];later(group==='vo_next_drop'&&lib[g].round_start?'round_start':group==='vo_next_drop'&&lib[g].next_drop?'next_drop':'match_start',14,g)}
       }
       return false;
     }
@@ -1192,11 +1204,14 @@ const VOICE=(()=>{
     if(amt>=Math.max(22,mhp(G.P)*.3))play('hurt_heavy',{pri:2,cd:3,key:'heavy'});
     else play('hurt_grunt',{pri:1,cd:1.6,key:'hurt'});
   }
-  function ability(k){const m={pistol:'ability_turret',revolver:'molotov_use'}[k];if(m)play(m,{pri:1,cd:2})}
+  function ability(k){const m={pistol:'ability_turret',revolver:'molotov_use',smg:'ability_mine',rifle:'barrier_use',shotgun:'cover_use',sniper:'cloak_use',crossbow:'fence_use',sword:'lunge_use',rocket:'rocket_jump',carbine:'ability_scan',scorch:'ability_bubble'}[k];if(m)play(m,{pri:1,cd:{crossbow:20,smg:8}[k]||2})}
+  function say(k,o){if(G.P)play(k,o)}
+  function deployEnd(kind){const m={turret:'turret_gone',cover:'cover_end',barrier:'barrier_break'}[kind];if(m)play(m,{pri:1,cd:6,key:'dend'})}
+  function loot(){play('loot',{cd:25})}
   function zkill(z){
     if(!who())return;
     if(z.zk==='boss'||z.zk==='brute'){play('kill_boss',{pri:1,cd:5,key:'kb'});return}
-    if(Math.random()<.3){const wk={pistol:'kill_pistol',revolver:'kill_revolver'}[G.P.weapon];play(Math.random()<.35&&wk?wk:'kill_zombie',{cd:9,key:'kz'})}
+    if(Math.random()<.3){const wk={pistol:'kill_pistol',revolver:'kill_revolver',smg:'kill_smg',rifle:'rifle_kill',shotgun:'shotgun_kill',sniper:'kill_sniper',crossbow:'kill_crossbow',sword:'kill_sword',rocket:'kill_rocket',carbine:'kill_carbine',scorch:'kill_scorch'}[G.P.weapon];play(Math.random()<.35&&wk?wk:'kill_zombie',{cd:9,key:'kz'})}
   }
   function tick(dt){
     const P=G.P,c=who(),t=now();if(!c)return;
@@ -1217,7 +1232,7 @@ const VOICE=(()=>{
       for(const z of G.fighters)if(z.zomb&&z.alive&&z.zk==='boss'&&Math.hypot(z.x-P.x,z.y-P.y)<420){play('callout_boss',{cd:45});break}
       if(t-lastAny>50&&G.time-(P.hitT||-99)>10&&hpf>=.5)play('idle',{cd:45})}
   }
-  return {hook,hurt,ability,zkill,tick,busy,stop};
+  return {hook,hurt,ability,zkill,tick,busy,stop,say,deployEnd,loot};
 })();
 
 // ---------- Audio: procedural post-apocalyptic horror (no files) ----------
@@ -2076,11 +2091,10 @@ function boReset(){G.bo={s:0,t:rnd(28,38)}}
 function boStep(dt){
   const b=G.bo;if(!b||G.zmode)return;
   b.t-=dt;if(b.t>0)return;
-  if(b.s===0){b.s=1;b.t=2.5;SFX.blackout();if(!G.debug)NARR.say('vo_blackout_warn',{queue:true});feedAdd('BLACKOUT INCOMING: cones narrow, shots light you up',true)}
+  if(b.s===0){b.s=1;b.t=2.5;SFX.blackout();if(!G.debug)NARR.say('vo_blackout_warn',{queue:true})}
   else if(b.s===1){
     b.s=2;b.t=12;const st=G.st,o=G.fighters[0];
     for(let n=0,k=0;n<3&&k<60;k++){const a=Math.random()*TAU,r=Math.sqrt(Math.random())*st.r*.7,x=st.cx+Math.cos(a)*r,y=st.cy+Math.sin(a)*r;if(blocked(x,y,40))continue;G.deploys.push({kind:'flare',x,y,owner:o,t:0,life:12.5,R:190});n++}
-    feedAdd('BLACKOUT: cones narrow, shots light you up',true);
   }else{b.s=0;b.t=rnd(38,48);if(!G.debug)NARR.say('vo_blackout_end',{queue:true});for(const d of G.deploys)if(d.kind==='flare')d.life=Math.min(d.life,.6)}
 }
 const JUMP_D=320, JUMP_T=.42;
@@ -2358,7 +2372,7 @@ function stepDeploys(dt){
       if(d.arm>0)d.arm-=dt;
       else for(const e of fs){
         if(e===d.owner||isAlly(d.owner,e)||!e.alive)continue;
-        if(Math.hypot(e.x-d.x,e.y-d.y)<62){if(!e.zomb&&d.owner.id!==undefined&&!(e.tagT>3)){e.tagT=3;e.tagBy=d.owner.id}G.fx.push({kind:'ring',x:d.x,y:d.y,age:0,life:.7,r:60,col:'#9be36b'});makeGas(d.owner,d.x,d.y);if(near(d.x,d.y))burst(d.x,d.y,COL.orb,16,240);rm=true;break}
+        if(Math.hypot(e.x-d.x,e.y-d.y)<62){if(d.owner===G.P&&!e.zomb)VOICE.say('ability_tripped',{pri:1,cd:6});if(!e.zomb&&d.owner.id!==undefined&&!(e.tagT>3)){e.tagT=3;e.tagBy=d.owner.id}G.fx.push({kind:'ring',x:d.x,y:d.y,age:0,life:.7,r:60,col:'#9be36b'});makeGas(d.owner,d.x,d.y);if(near(d.x,d.y))burst(d.x,d.y,COL.orb,16,240);rm=true;break}
       }
     }else if(d.kind==='gas'||d.kind==='fire'){
       if(d.kind==='fire'&&near(d.x,d.y)&&Math.random()<dt*d.R*.35){const a=rnd(0,TAU),r=Math.sqrt(Math.random())*d.R*.9;G.fx.push({kind:'ember',x:d.x+Math.cos(a)*r,y:d.y+Math.sin(a)*r,vx:rnd(-12,12),vy:rnd(-90,-45),ph:rnd(0,6),age:0,life:rnd(.7,1.3),col:Math.random()<.5?'#ffd27a':'#ff7a2a'})}
@@ -2374,7 +2388,7 @@ function stepDeploys(dt){
         }
       }
     }
-    if(rm){if(d.kind==='dome')domeEnd(d);ds.splice(i,1)}
+    if(rm){if(d.kind==='dome')domeEnd(d);if(d.owner===G.P)VOICE.deployEnd(d.kind);ds.splice(i,1)}
   }
 }
 
@@ -3680,8 +3694,8 @@ function update0(dt){
   for(let i=G.orbs.length-1;i>=0;i--){const o=G.orbs[i];o.t+=dt;
     for(const f of fs){if(!f.alive||f.zomb)continue;
       if(Math.hypot(f.x-o.x,f.y-o.y)<f.r+14){
-        if(o.item==='armor'){if(f.armor>0)continue;f.armor=50;padFree(o);SFX.pickup('armor',o.x,o.y);if(near(o.x,o.y))burst(o.x,o.y,'#8fb8d8',12,200);o.gone=true;G.orbs.splice(i,1);break}
-        if(o.item){if(f[o.item]>=HEAL[o.item].cap)continue;f[o.item]++;padFree(o);SFX.pickup('item',o.x,o.y);if(near(o.x,o.y))burst(o.x,o.y,'#6be38a',8,160);o.gone=true;G.orbs.splice(i,1);break}
+        if(o.item==='armor'){if(f.armor>0)continue;f.armor=50;if(f===G.P)VOICE.loot();padFree(o);SFX.pickup('armor',o.x,o.y);if(near(o.x,o.y))burst(o.x,o.y,'#8fb8d8',12,200);o.gone=true;G.orbs.splice(i,1);break}
+        if(o.item){if(f[o.item]>=HEAL[o.item].cap){if(f===G.P&&(o.item==='band'||o.item==='kit')&&(!f.fullT||G.t-f.fullT>1.2)){f.fullT=G.t;G.fx.push({kind:'num',txt:o.item==='band'?'Bandages full':'Med Kit full',x:f.x,y:f.y-34,age:0,col:'#ffd27a'})}continue}f[o.item]++;if(f===G.P)VOICE.loot();if(f===G.P&&(o.item==='band'||o.item==='kit')){try{if(!localStorage.getItem('hordeheal')){localStorage.setItem('hordeheal','1');feedAdd('Walk over green kits to auto-collect them',false)}}catch(e){}}padFree(o);SFX.pickup('item',o.x,o.y);if(near(o.x,o.y))burst(o.x,o.y,'#6be38a',8,160);o.gone=true;G.orbs.splice(i,1);break}
         SFX.pickup('orb',o.x,o.y);gainXP(f,25);f.hp=Math.min(mhp(f),f.hp+8);if(near(o.x,o.y))burst(o.x,o.y,COL.orb,10,180);o.gone=true;G.orbs.splice(i,1);break}}}
   // storm
   for(const f of fs){
@@ -4512,22 +4526,52 @@ function render0(){
     const n=Math.ceil(G.countdown);ctx.fillStyle=COL.ink;
     const cd=clamp(Math.min(VW,VH)*.14,56,120),cy=VH*.40;
     const getReady=G.countdown>3.2;ctx.font=`800 ${getReady?Math.round(cd*.5):cd}px Oxanium, sans-serif`;ctx.fillText(getReady?'GET READY':n>3?'3':n<=0?(G.zmode?'GO':'DROP'):String(n),VW/2,cy);
+    {
+      const st2=G.zmode?`WAVE ${G.wave} · ${G.zTotal} ZOMBIES`:`DROP ${G.dropNo}${G.sudden?' · SUDDEN DEATH':''} · FIRST TO ${WIN_DROPS} WINS · ${N_FIGHT} FIGHTERS`;
+      ctx.save();ctx.font='800 14px Oxanium, sans-serif';
+      const sw=Math.min(VW-24,ctx.measureText(st2).width+32),sh=24,sx=VW/2-sw/2,sy=cy+36-17,rr=10;
+      ctx.beginPath();ctx.moveTo(sx+rr,sy);ctx.arcTo(sx+sw,sy,sx+sw,sy+sh,rr);ctx.arcTo(sx+sw,sy+sh,sx,sy+sh,rr);ctx.arcTo(sx,sy+sh,sx,sy,rr);ctx.arcTo(sx,sy,sx+sw,sy,rr);ctx.closePath();
+      ctx.fillStyle='rgba(0,0,0,.72)';ctx.fill();
+      ctx.strokeStyle=COL.you;ctx.lineWidth=1.5;ctx.stroke();
+      ctx.textAlign='center';ctx.fillStyle='#ffffff';ctx.fillText(st2,VW/2,cy+36,sw-16);
+      ctx.restore();
+    }
     ctx.font='700 13px Oxanium, sans-serif';ctx.fillStyle=COL.muted;
-    ctx.fillText(G.zmode?`WAVE ${G.wave} · ${G.zTotal} ZOMBIES`:`DROP ${G.dropNo}${G.sudden?' · SUDDEN DEATH':''} · FIRST TO ${WIN_DROPS} WINS · ${N_FIGHT} FIGHTERS`,VW/2,cy+40);
     if(G.dropNo===1&&!G.mouseMode&&!G.debug)ctx.fillText('LEFT THUMB MOVES · RIGHT THUMB AIMS AND FIRES',VW/2,cy+62);
+    if(G.dropNo===1&&G.mouseMode&&!G.debug&&!G.zmode){
+      const pt='WASD MOVE · MOUSE AIM/FIRE · SPACE DASH · Q ABILITY',pw=Math.min(VW-24,460),ph=28,px=VW/2-pw/2,py=cy+62-19;
+      ctx.save();ctx.font='800 14px Oxanium, sans-serif';
+      ctx.fillStyle='rgba(0,0,0,.72)';ctx.fillRect(px,py,pw,ph);
+      ctx.strokeStyle=COL.you;ctx.lineWidth=1.5;ctx.strokeRect(px,py,pw,ph);
+      ctx.textAlign='center';ctx.fillStyle='#ffffff';ctx.fillText(pt,VW/2,py+19,pw-16);
+      ctx.restore();
+    }
   }
 }
 function drawZoneArrow(st,P){
   if(G.zmode||G.debug||!P.alive)return;
   const dx=st.cx-P.x,dy=st.cy-P.y,d=Math.hypot(dx,dy),out=d-st.r;
-  if(out<=0||d<1)return;
+  const NEAR=120,near=out<=0&&out>-NEAR;
+  if((out<=0&&!near)||d<1)return;
   const ux=dx/d,uy=dy/d,R=Math.min(VW,VH)*.36,ax=VW/2+ux*R,ay=VH/2+uy*R,a=.65+.3*Math.sin(performance.now()/180);
+  if(near){
+    const k=1+out/NEAR,pu=.5+.5*Math.sin(performance.now()/160),va=(.18+.32*k)*(.55+.45*pu),rr=Math.hypot(VW,VH)/2;
+    ctx.save();
+    const g=ctx.createRadialGradient(VW/2,VH/2,rr*.55,VW/2,VH/2,rr);
+    g.addColorStop(0,'rgba(235,40,30,0)');g.addColorStop(1,'rgba(235,40,30,'+va.toFixed(2)+')');
+    ctx.fillStyle=g;ctx.fillRect(0,0,VW,VH);
+    ctx.font='800 16px Oxanium, sans-serif';ctx.textAlign='center';
+    const ty=Math.max(hudBottom+34,VH*.2),tw=ctx.measureText('NEAR ZONE EDGE').width+24;
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(VW/2-tw/2,ty-18,tw,26);
+    ctx.fillStyle='rgba(255,'+Math.round(90+80*pu)+',70,1)';ctx.fillText('NEAR ZONE EDGE',VW/2,ty);
+    ctx.restore();
+  }
   ctx.save();ctx.translate(ax,ay);ctx.rotate(Math.atan2(uy,ux));
   ctx.fillStyle='rgba(235,60,50,'+a.toFixed(2)+')';ctx.strokeStyle='rgba(0,0,0,.6)';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(18,0);ctx.lineTo(-10,-12);ctx.lineTo(-4,0);ctx.lineTo(-10,12);ctx.closePath();ctx.fill();ctx.stroke();
   ctx.restore();
   ctx.save();ctx.font='700 12px Oxanium, sans-serif';ctx.textAlign='center';ctx.fillStyle='rgba(255,255,255,.9)';
-  ctx.fillText(Math.round(out)+' to safe',ax-ux*22,ay-uy*22+4);ctx.restore();
+  ctx.fillText(near?'move inward':Math.round(out)+' to safe',ax-ux*22,ay-uy*22+4);ctx.restore();
 }
 function drawMinimap(st,reveal){
   const s=Math.min(PLAT.pc?190:clamp(Math.min(VW,VH)*.26,104,170),VW*.24),x=VW-s-16,y=hudBottom+8,k=s/WORLD,P=G.P;
@@ -4551,10 +4595,10 @@ function drawAttract(){
 }
 const E={pAr:$('#pAr'),aliveL:document.querySelector('.alive span'),pHp:$('#pHp'),pXp:$('#pXp'),pLv:$('#pLv'),you:$('#hud .you .tag b'),pWep:$('#pWep'),pAb:$('#pAb'),ab:$('#abBtn'),bandB:$('#bandBtn'),kitB:$('#kitBtn'),alive:$('#aliveN'),drop:$('#dropTxt'),kills:$('#killTxt'),wins:$('#winTxt'),storm:$('#stormTxt'),dash:$('#dashBtn'),hud:$('#hud')};
 function updateHUD(){
-  if(E.hud.hidden||!G.P)return;const P=G.debug?getViewer():G.P,st=storm(G.time);E.you.textContent=G.debug?P.name:'You';
+  if(E.hud.hidden||!G.P)return;const P=(G.debug||G.spectating)?getViewer():G.P,st=storm(G.time);E.you.textContent=G.debug?P.name:(P===G.P?(P.alive?'You':'You (out)'):P.name);
   E.pAr.style.width=clamp(P.armor/50,0,1)*100+'%';E.pAr.parentNode.style.visibility=P.armor>0?'visible':'hidden';
   E.pHp.style.width=clamp(P.hp/mhp(P),0,1)*100+'%';E.pXp.style.width=clamp(P.xp/need(P.level),0,1)*100+'%';
-  E.pLv.textContent='Lv '+P.level+(G.pending>0?' · +'+G.pending+' bonus':'');rdSet(E.pWep,CHARS[P.weapon].name+' '+(P.reloadT>0?'RELOADING':P.weapon==='sword'?'∞'+(P.defl>0?' · deflect '+P.defl:''):P.ammo+'/'+P.st.clip),P.reloadT>0?'#ffb020':(P.weapon!=='sword'&&P.ammo<=Math.ceil(P.st.clip*.25)?'#ff6a5a':''),P.reloadT>0&&P.st.reload>0?1-P.reloadT/P.st.reload:-1,P.reloadT>0);
+  E.pLv.textContent='Lv '+P.level+(P===G.P&&G.pending>0?' · +'+G.pending+' bonus':'');E.pWep.style.opacity=E.pAb.style.opacity=P.alive?'':'.45';rdSet(E.pWep,CHARS[P.weapon].name+' '+(P.reloadT>0?'RELOADING':P.weapon==='sword'?'∞'+(P.defl>0?' · deflect '+P.defl:''):P.ammo+'/'+P.st.clip),P.reloadT>0?'#ffb020':(P.weapon!=='sword'&&P.ammo<=Math.ceil(P.st.clip*.25)?'#ff6a5a':''),P.reloadT>0&&P.st.reload>0?1-P.reloadT/P.st.reload:-1,P.reloadT>0);
   if(P.weapon==='smg'){const mx=mineMax(P),cm=abCdMax(P);rdSet(E.pAb,CHARS.smg.ab+' '+'■'.repeat(P.mines)+'□'.repeat(Math.max(0,mx-P.mines))+' '+P.mines+'/'+mx+(P.mines<mx?' · next '+Math.ceil(cm-P.mineT)+'s':' · FULL'),P.mines>0?'#3dff6a':'#8a8a8a',P.mines<mx?P.mineT/cm:-1,P.mines>0)}
   else{const rdy=!(P.fenceT>0)&&!(P.abCD>0),cdp=(P.abCD>0&&!(P.fenceT>0))?1-P.abCD/abCdMax(P):-1;rdSet(E.pAb,CHARS[P.weapon].ab+' '+(P.fenceT>0?P.fenceN+'/'+fenceMax(P)+' posts · '+Math.ceil(P.fenceT)+'s':(P.abCD>0?Math.ceil(P.abCD)+'s':'READY'))+(P.abCh>0?' +'+P.abCh:'')+(P.weapon==='sniper'?(P.zoom?' · ZOOM':''):'')+(P.down?' · DOWN':''),rdy?'#3dff6a':(P.fenceT>0?'#ffd24a':'#8a8a8a'),cdp,rdy)}
   {const bt=G.debug?'INFO '+['ON','ALL','OFF'][G.dbgMode]:(G.molo>0?'CANCEL':(P.fenceT>0?'POST<b class="cnt">'+(fenceMax(P)-P.fenceN)+'</b>':P.weapon==='smg'?'MINES<b class="cnt">'+P.mines+'</b>':(P.st.fx.charge?CHARS[P.weapon].btn+'<b class="cnt">'+((P.abCD<=0?1:0)+P.abCh)+'</b>':CHARS[P.weapon].btn)));if(E.abHtml!==bt){E.abHtml=bt;E.ab.innerHTML=bt}}E.ab.hidden=!ov.hidden||(G.spectating&&!G.debug);
@@ -4655,8 +4699,18 @@ function netWakeTry(){
   ws.onclose=()=>{clearTimeout(to);if(NET.ws!==ws)return;NET.ws=null;if(NET.wake===W)W.tm=setTimeout(netWakeTry,W.n<3?1500:3000);else netDropped(NET.status||NET.code||NET.live?'Lost connection to the server.':'Could not reach the server. Check the address under Server.')};
   ws.onerror=()=>{};
 }
-setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&Date.now()-(NET.rx||0)>12000){netDropped('Lost connection to the server (timed out).');return}netSend({t:'ping',ts:Date.now()})}},3000);
-document.addEventListener('visibilitychange',()=>{NET.rx=Date.now()});
+setInterval(()=>{if(NET.ws&&NET.ws.readyState===1){if(!document.hidden&&!NET.chk&&Date.now()-(NET.rx||0)>12000){netDropped('Lost connection to the server (timed out).');return}netSend({t:'ping',ts:Date.now()})}},3000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)return;
+  const ws=NET.ws,t=Date.now();
+  if(NET.reco||NET.wake){NET.rx=t;return}
+  if(ws&&ws.readyState>=2){netDropped('Lost connection to the server.');return}
+  if(ws&&ws.readyState===1&&t-(NET.rx||0)>4000){
+    NET.chk=t;netSend({t:'ping',ts:t});
+    setTimeout(()=>{NET.chk=0;if(NET.ws===ws&&(NET.rx||0)<t)netDropped('Lost connection to the server (timed out).')},3000);
+    return}
+  NET.rx=t;
+});
 function netCleanup(){NET.live=false;NET.m=null;NET.paused=false;NET.zm.clear();NET.inp={};NET.cl={};NET.ready={};NET.acts=[];G.fighters=[];G.P=null;G.bullets=[];G.deploys=[];G.orbs=[];G.fx=[];G.spectating=false;G.pOut=false;G.mode='menu';showHUD(false)}
 // ---------- session token + auto-reconnect (auth mode) ----------
 const REJOIN_MS=28000;   // stay under the server's 30s slot hold
@@ -4701,6 +4755,15 @@ function netDropped(msg){
 }
 function netLeave(){netWakeStop();netRecoStop();netSessClear();netSend({t:'leave'});if(NET.ws){try{NET.ws.onclose=null;NET.ws.close()}catch(_){}NET.ws=null}NET.code='';NET.role=null;NET.players=[];netCleanup();menu()}
 function netMsg(m){
+  try{
+    if(!m||typeof m!=='object'||typeof m.t!=='string')return;
+    if((m.t==='joined'||m.t==='players')&&!Array.isArray(m.players))return;
+    if(m.t==='pong'&&typeof m.ts!=='number')return;
+    if(m.t==='r'&&(!m.d||typeof m.d!=='object'))return;
+    netMsgInner(m);
+  }catch(err){console.warn('netMsg error',err)}
+}
+function netMsgInner(m){
   switch(m.t){
     case'joined':NET.auth=!!m.auth;netSessSave(m);if(m.cfg)NET.cfg=m.cfg;NET.pid=m.pid;NET.code=m.code;NET.hostPid=m.host;NET.players=m.players;NET.role=m.pid===m.host?'host':'client';NET.notice='';if(m.rejoined)netRecoStop();if(m.started){NET.status='';break}netLobby();break;
     case'players':
@@ -4716,6 +4779,12 @@ function netMsg(m){
   }
 }
 function netRecv(from,d){
+  try{
+    if(!d||typeof d!=='object')return;
+    netRecvInner(from,d);
+  }catch(err){console.warn('netRecv error',err)}
+}
+function netRecvInner(from,d){
   if(!d)return;
   if(NET.m==='host'){
     if(d.k==='i'){const c=NET.cl[from];if(!c)return;let I=NET.inp[from];if(!I)I=NET.inp[from]={acts:[]};
