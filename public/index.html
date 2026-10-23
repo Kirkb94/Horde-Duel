@@ -259,6 +259,9 @@ html[data-plat=pc] h1{font-size:64px}
 .nin:focus{outline:2px solid var(--you);outline-offset:0}
 .nrow{display:flex;gap:8px}.nrow .nin{flex:1}.nrow .go{flex:0 0 auto;padding:12px 22px}
 #netInfo{position:fixed;top:4px;left:50%;transform:translateX(-50%);font:600 11px var(--mono);color:var(--muted);z-index:9;pointer-events:none;letter-spacing:.06em;text-shadow:0 1px 2px #000}
+.pfchk{cursor:pointer;padding:8px 0}.pfchk span,.pfaud label{display:flex;flex-direction:column;gap:2px;text-transform:none!important;letter-spacing:0!important}.pfchk b,.pfaud b{color:var(--ink);font-size:13px}.pfchk small,.pfaud small{color:var(--muted);font-size:11px;font-weight:500}
+.pfchk input[type=checkbox]{width:22px;height:22px;accent-color:var(--you);flex:0 0 auto}.pfaud{display:grid!important;grid-template-columns:minmax(0,240px) minmax(0,1fr) 40px;gap:14px}.pfaud input[type=range]{max-width:none!important;width:100%}@media (max-width:560px){.pfaud{grid-template-columns:1fr 40px}.pfaud label{grid-column:1/-1}}
+.pfaud output{min-width:34px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:700}
 </style>
 
 <canvas id="cv" aria-label="Arena"></canvas>
@@ -1132,6 +1135,9 @@ const PRE=(()=>{
 
 // ---------- Radio narrator (recorded lines in public/audio/narrator/) ----------
 // Add a filename (no extension) to NARR_FILES once its mp3 is recorded; takes of one moment share a name apart from the trailing _NN.
+const AUD_CATS=[["weapons", "Weapons", "Gunfire, reloads, empty clicks"], ["combat", "Combat & abilities", "Blasts, abilities, hits, dashes, heals"], ["zombies", "Zombies", "Groans, snarls, the horde"], ["voices", "Character voices", "Hero voice lines"], ["narrator", "Narrator", "Announcer lines"], ["ambient", "Music & ambience", "Drone, stings, the world"], ["ui", "Interface", "Doors, menus, warnings"]];
+const AUDV=(()=>{const d={};for(const [k] of AUD_CATS)d[k]=1;try{const o=JSON.parse(localStorage.getItem('hordeaudio')||'{}');for(const k in d)if(o[k]!=null)d[k]=Math.max(0,Math.min(1,+o[k]))}catch(e){}return d})();
+function audSave(){try{localStorage.setItem('hordeaudio',JSON.stringify(AUDV))}catch(e){}}
 const NARR=(()=>{
   const BASES=['match_start','next_drop','count_03','count_02','count_01','count_go','start_br','start_duel','start_team','start_online','zone_warning','zone_shrinking','outside_zone','zone_final','blackout_warn','blackout_end','horde_surge','hunter','surrounded','horde_growing','boss','you_eliminated','elim_storm','elim_horde','you_kill','other_elim','streak_2','streak_3','streak_5','left_10','left_05','left_03','left_02','you_down','mate_down','enemy_down','revive_give','revive_get','mate_lost','team_one_left','no_revives','drop_win','drop_lose','drop_draw','sudden','match_point','match_win','match_win_team','match_lose','rematch','zsurv_start','wave_start','wave_clear','zsurv_over'];
   // only recorded files; add new names here as mp3s land in public/audio/narrator/ (a name without _NN is a single-take line)
@@ -1185,7 +1191,7 @@ const NARR=(()=>{
     last[group]=pick;
     try{
       const a=PRE.take('audio/narrator/'+pick+'.mp3');
-      a.volume=Math.max(0,Math.min(1,VOLK));
+      a.volume=Math.max(0,Math.min(1,VOLK*AUDV.narrator));
       const done=()=>{if(cur===a){cur=null;endT=tnow()}};
       a.addEventListener('ended',done);a.addEventListener('error',done);
       cur=a;curG=group;
@@ -1193,7 +1199,7 @@ const NARR=(()=>{
     }catch(e){cur=null;return false}
     return true;
   }
-  function sync(){if(cur){if(!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK))}}
+  function sync(){if(cur){if(!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK*AUDV.narrator))}}
   setInterval(sync,250);
   let armed=false;
   let fired=4,lastC=-1;
@@ -1223,7 +1229,7 @@ const NARR=(()=>{
       const ss=window.speechSynthesis;if(!ss||typeof SpeechSynthesisUtterance==='undefined')return;
       ss.cancel();
       const u=new SpeechSynthesisUtterance(word);
-      u.volume=Math.max(0,Math.min(1,VOLK));u.rate=1.05;u.pitch=.8;
+      u.volume=Math.max(0,Math.min(1,VOLK*AUDV.narrator));u.rate=1.05;u.pitch=.8;
       ss.speak(u);
     }catch(e){}
   }
@@ -1348,7 +1354,7 @@ const VOICE=(()=>{
     last[c+k]=pick;
     try{
       const a=PRE.take('audio/voices/'+c+'/'+pick+'.mp3');
-      a.volume=Math.max(0,Math.min(1,VOLK));
+      a.volume=Math.max(0,Math.min(1,VOLK*AUDV.voices));
       const done=()=>{if(cur===a){cur=null;lastEnd=now()}};
       a.addEventListener('ended',done);
       a.addEventListener('error',()=>{bad[c+pick]=1;done()});
@@ -1358,7 +1364,7 @@ const VOICE=(()=>{
     cd[key]=t;lastAny=t;
     return true;
   }
-  setInterval(()=>{if(cur){if(typeof SFX==='undefined'||!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK))}},250);
+  setInterval(()=>{if(cur){if(typeof SFX==='undefined'||!SFX.on)stop();else cur.volume=Math.max(0,Math.min(1,VOLK*AUDV.voices))}},250);
   function later(k,wait,ch){const c=ch||who();if(c&&lib[c][k]&&pend.length<4)pend.push({c,k,exp:now()+wait})}
   // queue mp3s of the local character and the 2v2 ally (intro/callouts first)
   function preload(){
@@ -1458,12 +1464,13 @@ const VOICE=(()=>{
 // ---------- Audio: procedural post-apocalyptic horror (no files) ----------
 let VOLK=1;
 const SFX=(()=>{
+  let CUR='combat',ambC=null,hordeC=null;const catV=()=>AUDV[CUR]==null?1:AUDV[CUR];
   let ac=null,master,verb,noiseBuf,ambG,hordeG,voices=0,lastT={},evT=5,grT=1,hbT=0,on=true;
   try{on=localStorage.getItem('hordemute')!=='1'}catch(e){}
   const now=()=>ac.currentTime;
   function can(k,gap){if(!ac||!on)return false;const t=now();if(lastT[k]&&t-lastT[k]<gap)return false;if(voices>34)return false;lastT[k]=t;return true}
   function bus(vol,pan,wet,lp){
-    const g=ac.createGain();g.gain.value=vol;let n=g;
+    const g=ac.createGain();g.gain.value=vol*catV();let n=g;
     if(lp){const f=ac.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;g.connect(f);n=f}
     if(ac.createStereoPanner){const p=ac.createStereoPanner();p.pan.value=clamp(pan||0,-1,1);n.connect(p);n=p}
     n.connect(master);
@@ -1511,6 +1518,7 @@ const SFX=(()=>{
     voices++;src.onended=()=>{voices--};src.start(t,off,seg);src.stop(t+dur+.05);return true;
   }
   function groan(x,y,kind,vol){
+    CUR='zombies';
     const P=x==null?{v:vol||.5,pan:(Math.random()*2-1)*.8}:pos(x,y,1000);if(!P)return;
     kind=kind===true?'brute':(kind||'walker');
     if(sampleGroan(P,kind,vol))return;
@@ -1540,7 +1548,7 @@ const SFX=(()=>{
   function far(P){return 1200+16000*Math.pow(P.v,.7)}
   function startAmbient(){
     const t=now();
-    ambG=ac.createGain();ambG.gain.value=.0;ambG.connect(master);ambG.gain.linearRampToValueAtTime(.7,t+4);
+    ambG=ac.createGain();ambG.gain.value=.0;ambC=ac.createGain();ambC.gain.value=AUDV.ambient;ambC.connect(master);ambG.connect(ambC);ambG.gain.linearRampToValueAtTime(.7,t+4);
     // low dread drone
     const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=150;lp.connect(ambG);
     for(const [type,f,g] of [['sawtooth',41,.5],['sawtooth',41.8,.5],['sine',82.5,.35],['triangle',61.5,.12]]){
@@ -1556,7 +1564,7 @@ const SFX=(()=>{
     // horde shuffle rumble
     const hs=ac.createBufferSource();hs.buffer=noiseBuf;hs.loop=true;
     const hf=ac.createBiquadFilter();hf.type='lowpass';hf.frequency.value=260;hordeG=ac.createGain();hordeG.gain.value=0;
-    hs.connect(hf);hf.connect(hordeG);hordeG.connect(master);hs.start();
+    hs.connect(hf);hf.connect(hordeG);hordeC=ac.createGain();hordeC.gain.value=AUDV.zombies;hordeC.connect(master);hordeG.connect(hordeC);hs.start();
   }
   function init(){
     if(ac){if(ac.state==='suspended')ac.resume();return}
@@ -1690,6 +1698,8 @@ const SFX=(()=>{
         else{const b=bus(.2,pan,.8);tone({bus:b,f0:52,f1:30,dur:.9,gain:1})}}
     }
   };
+  api.audApply=()=>{if(!ac)return;const t=now();if(ambC)ambC.gain.setTargetAtTime(AUDV.ambient,t,.05);if(hordeC)hordeC.gain.setTargetAtTime(AUDV.zombies,t,.05)};
+  for(const [k,c] of Object.entries({shot:'weapons',dry:'weapons',empty:'weapons',lowAmmo:'weapons',rl:'weapons',boom:'combat',thwack:'combat',hurt:'combat',fdie:'combat',dash:'combat',ability:'combat',satBeep:'combat',heal:'combat',pickup:'combat',drop:'combat',blackout:'combat',snarl:'zombies',zdie:'zombies',hunter:'zombies',groan:'zombies',sting:'ambient',tick:'ambient',lock:'ui',deny:'ui',toggle:'ui'})){const f=api[k];if(typeof f==='function')api[k]=function(){CUR=c;return f.apply(this,arguments)}}
   return api;
 })();
 for(const ev of ['pointerdown','keydown','touchstart'])addEventListener(ev,()=>SFX.init(),{passive:true});
@@ -1791,9 +1801,9 @@ function pfDetectPC(){
   const ua=/Android|iPhone|iPad|iPod|Mobile|CriOS|FxiOS|Silk/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   return !(ua||mq('(pointer:coarse)')||mq('(hover:none)'));
 }
-function pfSave(){try{localStorage.setItem('pf2',JSON.stringify({mode:PLAT.mode,zoomK:PLAT.zoomK,look:PLAT.look,hints:PLAT.hints,q:PLAT.q,vol:PLAT.vol,bind:BIND}))}catch(_){}}
+function pfSave(){try{localStorage.setItem('pf2',JSON.stringify({mode:PLAT.mode,zoomK:PLAT.zoomK,look:PLAT.look,hints:PLAT.hints,q:PLAT.q,vol:PLAT.vol,autoRl:PLAT.autoRl!==false,bind:BIND}))}catch(_){}}
 function pfLoad(){try{const o=JSON.parse(localStorage.getItem('pf2')||'null');if(!o)return;
-  PLAT.mode=o.mode||'auto';PLAT.zoomK=clamp(+o.zoomK||1,.6,1.6);PLAT.look=clamp(o.look==null?.35:+o.look,0,.8);PLAT.hints=o.hints!==false;PLAT.q=o.q||'auto';PLAT.vol=clamp(o.vol==null?1:+o.vol,0,1);
+  PLAT.mode=o.mode||'auto';PLAT.zoomK=clamp(+o.zoomK||1,.6,1.6);PLAT.look=clamp(o.look==null?.35:+o.look,0,.8);PLAT.hints=o.hints!==false;PLAT.q=o.q||'auto';PLAT.vol=clamp(o.vol==null?1:+o.vol,0,1);PLAT.autoRl=o.autoRl!==false;
   if(o.bind)for(const k in BIND_DEF)if(Array.isArray(o.bind[k])&&o.bind[k].length)BIND[k]=o.bind[k].filter(x=>typeof x==='string').slice(0,3)}catch(_){}}
 function pfApply(){
   const pc=PLAT.mode==='pc'?true:PLAT.mode==='phone'?false:PLAT.auto;
@@ -1836,7 +1846,7 @@ function kbAction(e){
   const c=e.code;
   if(PF.rebind){e.preventDefault();pfCaptureKey(e);return true}
   if(e.altKey&&c==='Enter'){pfFullscreen();e.preventDefault();return true}
-  if(PF.open){if(c==='Escape'){pfBack();e.preventDefault()}return true}
+  if(PF.open){if(c==='Escape'){if(PF.sub==='audio'){PF.sub=null;pfSettings()}else pfBack();e.preventDefault()}return true}
   const has=a=>BIND[a].includes(c)||(ALT[a]||[]).includes(c);
   if(!ov.hidden){
     // menu screens: Enter confirms, number keys pick cards
@@ -1863,13 +1873,22 @@ function pfSettings(from){
   show(`<p class="eyebrow">Settings</p><h2>Controls &amp; display</h2>
   <div class="group"><span class="glabel">Device (detected: ${PLAT.auto?'PC':'phone'})</span>${seg('plat',PLAT.mode,[['auto','Auto'],['pc','PC'],['phone','Phone']])}</div>
   <div class="group"><span class="glabel">Graphics quality</span>${seg('q',PLAT.q,[['auto','Auto'],['high','High'],['low','Low'],['lowest','Very low']])}</div>
-  <div class="pfrow"><label>Volume</label><input type="range" data-pr="vol" min="0" max="100" value="${Math.round(PLAT.vol*100)}"></div>
+  <div class="row"><button class="go ghost" data-pf="audio">Audio · volume by category</button></div>
+  <label class="pfrow pfchk"><span><b>Auto reload</b><small>Off: reload with R, or by pulling the trigger on an empty clip</small></span><input type="checkbox" data-pc="autoRl" ${PLAT.autoRl!==false?'checked':''}></label>
   <div class="pfrow"><label>Camera look-ahead (PC)</label><input type="range" data-pr="look" min="0" max="80" value="${Math.round(PLAT.look*100)}"></div>
   <div class="pfrow"><label>View zoom (PC · wheel)</label><input type="range" data-pr="zoom" min="60" max="160" value="${Math.round(PLAT.zoomK*100)}"></div>
   <div class="row"><button class="go ghost" data-pf="hints">Key hints: ${PLAT.hints?'on':'off'}</button><button class="go ghost" data-pf="full">Fullscreen</button></div>
   <div class="group"><span class="glabel">Keyboard (click an action, then press a key)</span><div class="keys">${kb}</div>
   <p class="how" style="margin:0">Also: Alt+Enter fullscreen · M mute · right click = ability · arrow keys, Shift and E still work. In menus, Enter confirms and 1–9 pick a card.</p></div>
   <div class="row"><button class="go ghost" data-pf="reset">Reset keys</button><button class="go" data-pf="back">Back</button></div>`);
+}
+function pfAudio(){
+  PF.open=true;PF.sub='audio';
+  const sl=(key,label,desc,v)=>`<div class="pfrow pfaud"><label for="pa_${key}"><b>${label}</b><small>${desc}</small></label><input id="pa_${key}" type="range" ${key==='master'?'data-pr="vol"':'data-pa="'+key+'"'} min="0" max="100" value="${Math.round(v*100)}"><output>${Math.round(v*100)}</output></div>`;
+  show(`<p class="eyebrow">Settings</p><h2>Audio</h2><p class="lede" style="margin:0">Each slider sits on top of Master. Changes apply straight away.</p>
+  ${sl('master','Master','Everything',PLAT.vol)}
+  ${AUD_CATS.map(([k,n,d])=>sl(k,n,d,AUDV[k])).join('')}
+  <div class="row"><button class="go ghost" data-pf="audreset">Reset audio</button><button class="go ghost" data-pf="mute2">Sound: ${SFX.on?'on':'off'}</button><button class="go" data-pf="audback">Back</button></div>`);
 }
 function pfBack(){
   PF.open=false;PF.rebind=null;
@@ -1882,6 +1901,10 @@ panel.addEventListener('click',e=>{
     case 'settings-menu':pfSettings('menu');break;
     case 'settings-pause':pfSettings('pause');break;
     case 'back':pfBack();break;
+    case 'audio':pfAudio();break;
+    case 'audback':PF.sub=null;pfSettings();break;
+    case 'audreset':for(const [k] of AUD_CATS)AUDV[k]=1;audSave();PLAT.vol=1;pfSave();SFX.setVol(1);SFX.audApply&&SFX.audApply();pfAudio();break;
+    case 'mute2':SFX.toggle();pfAudio();break;
     case 'plat':PLAT.mode=v;pfSave();pfApply();pfSettings();break;
     case 'q':PLAT.q=v;pfSave();if(VW)resize();pfSettings();break;
     case 'hints':PLAT.hints=!PLAT.hints;pfSave();pfSettings();break;
@@ -1890,6 +1913,8 @@ panel.addEventListener('click',e=>{
     case 'reset':pfResetBinds();pfSave();pfSettings();break;
   }
 });
+panel.addEventListener('change',e=>{const c=e.target.closest('[data-pc]');if(!c)return;if(c.dataset.pc==='autoRl'){PLAT.autoRl=!!c.checked;pfSave()}});
+panel.addEventListener('input',e=>{const a=e.target.closest('[data-pa]');if(a){AUDV[a.dataset.pa]=clamp(+a.value/100,0,1);audSave();try{SFX.audApply&&SFX.audApply()}catch(_){}const o=a.parentNode.querySelector('output');if(o)o.textContent=a.value;return}{const r=e.target.closest('[data-pr]');if(r){const o=r.parentNode.querySelector('output');if(o)o.textContent=r.value}}});
 panel.addEventListener('input',e=>{
   const r=e.target.closest('[data-pr]');if(!r)return;const n=+r.value;
   if(r.dataset.pr==='vol'){PLAT.vol=n/100;SFX.setVol(PLAT.vol)}
@@ -3216,7 +3241,7 @@ function stepFighter(f,dt){
   f.cool-=dt;if(f.boltT>0)f.boltT-=dt;
   if(f.reloadT>0){f.reloadT-=dt;if(f.reloadT<=0){f.reloadT=0;f.ammo=f.st.clip;f.rdT=.28}}
   if(f.wantFire||f.reloadT>0)f.idleT=0;else f.idleT+=dt;
-  if(f.reloadT<=0&&f.ammo<f.st.clip&&(f.ammo<=0||(f.idleT>.9&&f.weapon!=='sniper')||(f===G.P&&keys.has('KeyR')&&!(f.boltT>0))))f.reloadT=f.st.reload;
+  if(f.reloadT<=0&&f.ammo<f.st.clip&&((f===G.P&&PLAT.autoRl===false)?((f.ammo<=0&&f.wantFire)||(keys.has('KeyR')&&!(f.boltT>0))):(f.ammo<=0||(f.idleT>.9&&f.weapon!=='sniper')||(f===G.P&&keys.has('KeyR')&&!(f.boltT>0)))))f.reloadT=f.st.reload;
   if(f===G.P&&f.alive&&f.weapon!=='sword'){const th=Math.ceil(f.st.clip*.25),pa=f._pa==null?f.ammo:f._pa;if(f.ammo<=0&&pa>0)SFX.empty();else if(f.ammo>0&&f.ammo<=th&&pa>th)SFX.lowAmmo();else if(f.wantFire&&(f.ammo<=0||f.reloadT>0)&&f.boltT<=0)SFX.dry();f._pa=f.ammo}
   const firing=f.wantFire&&f.reloadT<=0&&f.ammo>0&&f.healT<=0&&!f.down;
   f.heat=firing?Math.min(1,f.heat+dt/2.5):Math.max(0,f.heat-dt*1.5);
@@ -3225,7 +3250,7 @@ function stepFighter(f,dt){
     fireWeapon(f);if(f.weapon!=='sword')f.ammo--;
     f.cool=1/(f.st.rate*(fx.fan?2.2:1)*(1+f.heat*.45*(fx.ramp||0)));
     if(f.weapon==='sniper'){f.boltMax=f.cool;f.boltT=f.cool} // bolt action: work the bolt between shots
-    if(f.ammo<=0)f.reloadT=f.st.reload;
+    if(f.ammo<=0&&!(f===G.P&&PLAT.autoRl===false))f.reloadT=f.st.reload;
   }
   if(f.cool<0)f.cool=0;
 }
