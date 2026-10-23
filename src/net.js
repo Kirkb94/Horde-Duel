@@ -605,7 +605,7 @@ const DECAY=['muzzle','swingT','hitFlash','parryT','rdT','inv','dashCD','healT',
 function netClientUpdate(dt){
   const P=G.P,fs=G.fighters;
   const rt=performance.now()-(NET.delay||110),rtZ=rt-(NET.iv||50);   // zombies arrive every other snapshot: one extra interval of delay
-  if(G.mode==='count'){G.countdown-=dt;NARR.say.tick(G.countdown);if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
+  if(G.mode==='count'){NARR.say.cd(dt);if(G.countdown<=0&&NET.gotSnap)G.mode='play'}
   else if(G.mode==='play'||G.mode==='ending')G.time+=dt;
   for(let i=0;i<fs.length;i++){const f=fs[i];
     f.t+=dt;for(const k of DECAY)if(f[k]>0)f[k]=Math.max(0,f[k]-dt);
